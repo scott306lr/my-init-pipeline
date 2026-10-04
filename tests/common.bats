@@ -37,3 +37,14 @@ setup() {
   run env -i HOME="$HOME" PATH=/usr/bin:/bin bash -c ". \"\$HOME/.bashrc\"; echo \"\$PATH\""
   [[ "$output" == "$HOME/.local/bin:"* ]]
 }
+
+@test "add_shell_init is idempotent and only runs in interactive shells" {
+  add_shell_init 'export MIP_HOOKED=1'
+  add_shell_init 'export MIP_HOOKED=1'
+  [ "$(grep -c MIP_HOOKED "$MIP_ENV_FILE")" -eq 1 ]
+  env_has_shell_init 'export MIP_HOOKED=1'
+  run bash -c ". '$MIP_ENV_FILE'; echo \"[\${MIP_HOOKED:-}]\""
+  [ "$output" = "[]" ]
+  run bash -ic ". '$MIP_ENV_FILE'; echo \"[\${MIP_HOOKED:-}]\"" </dev/null
+  [[ "$output" == *"[1]"* ]]
+}

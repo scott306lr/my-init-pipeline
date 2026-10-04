@@ -106,21 +106,25 @@ cmd_run() {
   mkdir -p "$RUN_DIR" && ln -sfn "$RUN_DIR" "$MIP_STATE_DIR/runs/latest"
   printf 'Pipeline: %d step(s), up to %d in parallel%s\n\n' "${#plan[@]}" "$MIP_JOBS" \
     "$([ "$MIP_INTERACTIVE" = 0 ] && echo ', non-interactive')"
-  local rc=0
+  local rc=0 env_before
+  env_before="$(env_digest)"
   pipeline_run "${plan[@]}" || rc=$?
-  path_hint
+  shell_hint "$env_before"
   return "$rc"
 }
 
-# path_hint — a child process can't update the calling shell, so if env.sh now
-# adds PATH entries the caller's shell lacks, say how to pick them up.
-path_hint() {
+env_digest() { cksum "$MIP_ENV_FILE" 2>/dev/null || true; }
+
+# shell_hint DIGEST_BEFORE — a child process can't update the calling shell, so
+# say how to pick up the change when env.sh now adds PATH entries the caller
+# lacks, or when this Run changed env.sh at all (e.g. a new shell hook).
+shell_hint() {
   [ -f "$MIP_ENV_FILE" ] || return 0
   local updated
   # shellcheck disable=SC1090
   updated="$(PATH="$MIP_CALLER_PATH" bash -c '. "$1" && printf %s "$PATH"' _ "$MIP_ENV_FILE")" || return 0
-  [ "$updated" = "$MIP_CALLER_PATH" ] && return 0
-  printf '\nPATH changed. To use the new tools in this shell, run:  source %s\n' "${MIP_BASHRC/#$HOME/\~}"
+  if [ "$updated" = "$MIP_CALLER_PATH" ] && [ "$(env_digest)" = "$1" ]; then return 0; fi
+  printf '\nShell setup changed. To use it in this shell, run:  source %s\n' "${MIP_BASHRC/#$HOME/\~}"
 }
 
 case "${1:-help}" in

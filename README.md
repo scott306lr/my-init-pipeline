@@ -1,7 +1,7 @@
 # my-init-pipeline
 
 One command to bring a fresh Linux server to my working setup, **without root**:
-gh, Claude Code (plus my synced `~/.claude`), Codex, uv, nvitop and herdr.
+gh, Claude Code (plus my synced `~/.claude`), Codex, uv, nvitop, zoxide and herdr.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/bootstrap.sh | bash
@@ -24,6 +24,7 @@ claude-config   claude-config    claude gh-auth
 codex           codex-install    path-env
 uv              uv-install       path-env
 nvitop          nvitop-install   uv
+zoxide          zoxide-install   path-env
 herdr           herdr-install    claude-config codex
 ```
 
@@ -45,9 +46,9 @@ going; anything that requires them waits.
 | `./init.sh list` | Step → Action → requires → Check result → summary |
 | `./init.sh describe <step>` | Everything about one Step |
 
-If a Run added PATH entries your current shell doesn't have yet, it ends by
-printing `source ~/.bashrc` (a script can't update the shell that started it;
-new terminals pick the entries up on their own).
+If a Run changed your shell setup (PATH entries your current shell lacks, or a
+new hook such as zoxide's), it ends by printing `source ~/.bashrc` (a script
+can't update the shell that started it; new terminals pick it up on their own).
 
 Each Run prints one line per Step and ends with **Notes**: things left for you,
 such as logging in to `claude` and `codex`. Full logs go to
@@ -75,12 +76,13 @@ such as logging in to `claude` and `codex`. Full logs go to
 Rules for Actions:
 - **Checks must have no side effects.** `list` and `--dry-run` call them.
 - After `run`, the runner runs the Check again, and the Step only succeeds if it passes.
-- Never edit rc files. Use `add_path '$HOME/some/bin'`, which records the entry in
-  `~/.config/my-init-pipeline/env.sh`. `~/.bashrc` sources that file through one
+- Never edit rc files. Use `add_path '$HOME/some/bin'` for PATH and
+  `add_shell_init '<line>'` for interactive-only setup (e.g. `eval "$(tool init bash)"`).
+  Both record into `~/.config/my-init-pipeline/env.sh`. `~/.bashrc` sources that file through one
   marked block.
 - Each function runs in a fresh `bash -eo pipefail`, with `lib/common.sh` and `config.sh`
   loaded. Helpers: `have`, `info`, `die`, `fetch`, `run_installer`,
-  `github_latest_tag`, `add_path`.
+  `github_latest_tag`, `add_path`, `add_shell_init`.
 
 To swap how something is installed, point its Step at a different Action. The
 Step name and every dependency on it stay unchanged. To remove a Step, delete its

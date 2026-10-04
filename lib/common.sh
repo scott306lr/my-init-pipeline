@@ -32,9 +32,23 @@ add_path() {
   # The guard keeps PATH free of duplicates however often env.sh is sourced.
   line="case \":\$PATH:\" in *\":$dir:\"*) ;; *) export PATH=\"$dir:\$PATH\" ;; esac"
   mkdir -p "$MIP_CONFIG_DIR"
-  [ -f "$MIP_ENV_FILE" ] || printf '# Managed by my-init-pipeline (lib/common.sh add_path).\n' >"$MIP_ENV_FILE"
+  [ -f "$MIP_ENV_FILE" ] || printf '# Managed by my-init-pipeline (lib/common.sh add_path / add_shell_init).\n' >"$MIP_ENV_FILE"
   grep -qxF "$line" "$MIP_ENV_FILE" || printf '%s\n' "$line" >>"$MIP_ENV_FILE"
   load_env
+}
+
+# add_shell_init LINE — persist LINE in the managed env file, run only by
+# interactive shells (prompt hooks, `eval "$(tool init bash)"`, aliases).
+add_shell_init() {
+  local line="case \$- in *i*) $1 ;; esac"
+  mkdir -p "$MIP_CONFIG_DIR"
+  [ -f "$MIP_ENV_FILE" ] || printf '# Managed by my-init-pipeline (lib/common.sh add_path / add_shell_init).\n' >"$MIP_ENV_FILE"
+  grep -qxF "$line" "$MIP_ENV_FILE" || printf '%s\n' "$line" >>"$MIP_ENV_FILE"
+}
+
+# env_has_shell_init LINE — true if add_shell_init LINE has already been recorded.
+env_has_shell_init() {
+  [ -f "$MIP_ENV_FILE" ] && grep -qxF "case \$- in *i*) $1 ;; esac" "$MIP_ENV_FILE"
 }
 
 # env_has_path DIR — true if add_path DIR has already been recorded.

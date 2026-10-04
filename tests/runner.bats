@@ -177,17 +177,26 @@ setup() { setup_pipeline; }
   printf 'check() { env_has_path "\\$HOME/tools"; }\nrun() { add_path "\\$HOME/tools"; }\n' >"$MIP_ACTIONS_DIR/p.sh"
   run mip run --non-interactive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"PATH changed."*"source ~/.bashrc"* ]]
+  [[ "$output" == *"Shell setup changed."*"source ~/.bashrc"* ]]
 
   # Same state, but the calling shell already has the entry: no hint.
   PATH="$HOME/tools:$PATH" run mip run --non-interactive
-  [[ "$output" != *"PATH changed."* ]]
+  [[ "$output" != *"Shell setup changed."* ]]
+}
+
+@test "shell hint: shown when the run adds a shell hook (no PATH change)" {
+  step h
+  printf 'check() { env_has_shell_init "alias zz=true"; }\nrun() { add_shell_init "alias zz=true"; }\n' >"$MIP_ACTIONS_DIR/h.sh"
+  run mip run --non-interactive
+  [[ "$output" == *"Shell setup changed."* ]]
+  run mip run --non-interactive
+  [[ "$output" != *"Shell setup changed."* ]]
 }
 
 @test "PATH hint: absent when nothing touches PATH" {
   step a; fake_action a
   run mip run --non-interactive
-  [[ "$output" != *"PATH changed."* ]]
+  [[ "$output" != *"Shell setup changed."* ]]
 }
 
 @test "notes from Steps that ran are printed at the end" {
