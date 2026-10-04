@@ -143,6 +143,7 @@ step_execute() {
     if [ "$rc" = 0 ]; then
       if [ "$MIP_MODE" = upgrade ]; then
         echo "-- upgrade"
+        echo upgrading >"$RUN_DIR/$step.started"
         rc=0; step_call "$step" upgrade || rc=$?
         case "$rc" in
           0) echo "RESULT upgraded" ;;
@@ -156,6 +157,7 @@ step_execute() {
     fi
   fi
   echo "-- run"
+  echo installing >"$RUN_DIR/$step.started"
   if ! step_call "$step" run; then echo "RESULT failed"; return; fi
   echo "-- check (after run)"
   if ! step_call "$step" check; then
@@ -215,7 +217,7 @@ is_dead() { case "$1" in failed | deferred | blocked | aborted) return 0 ;; esac
 # Returns 1 if any Step failed.
 pipeline_run() {
   local -a plan=("$@")
-  local -A state=() pid=() start=()
+  local -A state=() pid=() start=() announced=()
   local s d r ready running=0 abort=0 progressed ticker="" last_change=$SECONDS
   local heartbeat="${MIP_HEARTBEAT:-30}"
 
@@ -223,6 +225,16 @@ pipeline_run() {
   trap 'kill $(jobs -p) 2>/dev/null; exit 130' INT TERM
 
   while :; do
+    # Announce background Steps that got past their Check and are now working.
+    # Printed from here (not the job) so output never interleaves with an
+    # Interactive Step's prompt; while one runs, these wait their turn.
+    for s in "${plan[@]}"; do
+      [ "${state[$s]}" = running ] && [ -z "${announced[$s]:-}" ] && [ -f "$RUN_DIR/$s.started" ] || continue
+      announced[$s]=1
+      printf '▶ %-16s %s…\n' "$s" "$(cat "$RUN_DIR/$s.started")"
+      last_change=$SECONDS
+    done
+
     # Collect finished background Steps.
     for s in "${plan[@]}"; do
       [ "${state[$s]}" = running ] || continue
@@ -286,14 +298,14 @@ pipeline_run() {
 
     [ "$progressed" = 1 ] && continue
     [ "$running" -gt 0 ] || break
-    # A ticker job bounds the wait, so long silent Steps (claude-config takes
-    # minutes) still get a "still running" line instead of a frozen screen.
+    # A 1s ticker job bounds the wait, so start lines appear promptly and long
+    # silent Steps (claude-config takes minutes) get a "still running" line.
     if [ -z "$ticker" ] || ! kill -0 "$ticker" 2>/dev/null; then
-      sleep "$heartbeat" &
+      sleep 1 &
       ticker=$!
     fi
     wait -n 2>/dev/null || true
-    if ! kill -0 "$ticker" 2>/dev/null && [ $((SECONDS - last_change)) -ge "$heartbeat" ]; then
+    if [ $((SECONDS - last_change)) -ge "$heartbeat" ]; then
       local busy=()
       for s in "${plan[@]}"; do
         [ "${state[$s]}" = running ] && busy+=("$s ($((SECONDS - start[$s]))s)")

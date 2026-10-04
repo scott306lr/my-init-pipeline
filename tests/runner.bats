@@ -147,6 +147,25 @@ setup() { setup_pipeline; }
   [[ "$output" != *"still running: quick"* ]]
 }
 
+@test "a Step that has work to do is announced before it finishes; satisfied ones are not" {
+  step a; step b
+  fake_action a --sleep 2; fake_action b
+  touch "$T/state/b"
+  run mip run --non-interactive
+  [ "$status" -eq 0 ]
+  started="$(grep -n '▶ a .*installing' <<<"$output" | cut -d: -f1)"
+  finished="$(grep -n '✓ a ' <<<"$output" | cut -d: -f1)"
+  [ -n "$started" ] && [ "$started" -lt "$finished" ]
+  [[ "$output" != *"▶ b "* ]]
+}
+
+@test "--upgrade announces upgrading" {
+  step a; fake_action a --upgrade
+  touch "$T/state/a"
+  run mip run --upgrade --non-interactive
+  [[ "$output" == *"▶ a"*"upgrading…"* ]]
+}
+
 @test "no heartbeat when Steps finish within the interval" {
   step a; fake_action a
   MIP_HEARTBEAT=5 run mip run --non-interactive
