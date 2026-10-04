@@ -1,0 +1,17 @@
+name: ci
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck -x init.sh bootstrap.sh lib/*.sh actions/*.sh tests/*.sh config.sh
+      - name: runner tests (bats)
+        run: tests/run.sh
+      - name: bootstrap clones and dry-runs
+        run: |
+          MIP_REPO_URL="$PWD" MIP_DIR="$RUNNER_TEMP/mip" bash bootstrap.sh --dry-run </dev/null
+      - name: end-to-end in a clean HOME (non-interactive, twice)
+        run: tests/e2e.sh

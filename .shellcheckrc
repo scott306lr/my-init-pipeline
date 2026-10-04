@@ -1,0 +1,4 @@
+# lib/, actions/ and config.sh are sourced bash fragments without a shebang.
+shell=bash
+# add_path takes '$HOME/...' unexpanded on purpose, so env.sh stays portable.
+disable=SC2016
