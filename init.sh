@@ -17,6 +17,7 @@
 # MIP_HEARTBEAT (seconds of silence before a "still running" line; default 30).
 set -uo pipefail
 
+MIP_CALLER_PATH="$PATH"   # the invoking shell's PATH, before anything here changes it
 MIP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIP_CONF="${MIP_CONF:-$MIP_ROOT/pipeline.conf}"
 MIP_ACTIONS_DIR="${MIP_ACTIONS_DIR:-$MIP_ROOT/actions}"
@@ -105,7 +106,21 @@ cmd_run() {
   mkdir -p "$RUN_DIR" && ln -sfn "$RUN_DIR" "$MIP_STATE_DIR/runs/latest"
   printf 'Pipeline: %d step(s), up to %d in parallel%s\n\n' "${#plan[@]}" "$MIP_JOBS" \
     "$([ "$MIP_INTERACTIVE" = 0 ] && echo ', non-interactive')"
-  pipeline_run "${plan[@]}"
+  local rc=0
+  pipeline_run "${plan[@]}" || rc=$?
+  path_hint
+  return "$rc"
+}
+
+# path_hint — a child process can't update the calling shell, so if env.sh now
+# adds PATH entries the caller's shell lacks, say how to pick them up.
+path_hint() {
+  [ -f "$MIP_ENV_FILE" ] || return 0
+  local updated
+  # shellcheck disable=SC1090
+  updated="$(PATH="$MIP_CALLER_PATH" bash -c '. "$1" && printf %s "$PATH"' _ "$MIP_ENV_FILE")" || return 0
+  [ "$updated" = "$MIP_CALLER_PATH" ] && return 0
+  printf '\nPATH changed. To use the new tools in this shell, run:  source %s\n' "${MIP_BASHRC/#$HOME/\~}"
 }
 
 case "${1:-help}" in

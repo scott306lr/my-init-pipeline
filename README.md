@@ -45,6 +45,10 @@ going; anything that requires them waits.
 | `./init.sh list` | Step → Action → requires → Check result → summary |
 | `./init.sh describe <step>` | Everything about one Step |
 
+If a Run added PATH entries your current shell doesn't have yet, it ends by
+printing `source ~/.bashrc` (a script can't update the shell that started it;
+new terminals pick the entries up on their own).
+
 Each Run prints one line per Step and ends with **Notes**: things left for you,
 such as logging in to `claude` and `codex`. Full logs go to
 `~/.local/state/my-init-pipeline/runs/latest/<step>.log`.
