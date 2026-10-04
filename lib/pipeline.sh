@@ -229,7 +229,9 @@ pipeline_run() {
     # Printed from here (not the job) so output never interleaves with an
     # Interactive Step's prompt; while one runs, these wait their turn.
     for s in "${plan[@]}"; do
-      [ "${state[$s]}" = running ] && [ -z "${announced[$s]:-}" ] && [ -f "$RUN_DIR/$s.started" ] || continue
+      if [ "${state[$s]}" != running ] || [ -n "${announced[$s]:-}" ] || [ ! -f "$RUN_DIR/$s.started" ]; then
+        continue
+      fi
       announced[$s]=1
       printf '▶ %-16s %s…\n' "$s" "$(cat "$RUN_DIR/$s.started")"
       last_change=$SECONDS
