@@ -1,7 +1,8 @@
 # my-init-pipeline
 
 One command to bring a fresh Linux server to my working setup, **without root**:
-gh, Claude Code (plus my synced `~/.claude`), Codex, uv, nvitop, zoxide and herdr.
+gh, Claude Code (plus my synced `~/.claude`), Codex, herdr, uv, nvitop, zoxide,
+fzf, lazygit, delta, btop, dust and the Hugging Face CLI.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/bootstrap.sh | bash
@@ -25,6 +26,12 @@ codex           codex-install    path-env
 uv              uv-install       path-env
 nvitop          nvitop-install   uv
 zoxide          zoxide-install   path-env
+fzf             fzf-install      path-env
+lazygit         lazygit-install  path-env
+delta           delta-install    path-env      # also sets git's pager, if none is set
+btop            btop-install     path-env
+dust            dust-install     path-env
+hf              hf-install       uv
 herdr           herdr-install    claude-config codex
 ```
 
@@ -82,7 +89,9 @@ Rules for Actions:
   marked block.
 - Each function runs in a fresh `bash -eo pipefail`, with `lib/common.sh` and `config.sh`
   loaded. Helpers: `have`, `info`, `die`, `fetch`, `run_installer`,
-  `github_latest_tag`, `add_path`, `add_shell_init`.
+  `github_latest_tag`, `machine_arch`, `release_sha256`, `install_release_binary`
+  (download a GitHub release tarball, verify its sha256 when published, install
+  one binary), `add_path`, `add_shell_init`.
 
 To swap how something is installed, point its Step at a different Action. The
 Step name and every dependency on it stay unchanged. To remove a Step, delete its

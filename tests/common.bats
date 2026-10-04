@@ -48,3 +48,37 @@ setup() {
   run bash -ic ". '$MIP_ENV_FILE'; echo \"[\${MIP_HOOKED:-}]\"" </dev/null
   [[ "$output" == *"[1]"* ]]
 }
+
+# A local release tarball with the binary nested like dust's/delta's layouts.
+make_release() {
+  mkdir -p "$T/rel/tool-v1-x86_64/sub"
+  printf '#!/bin/sh\necho tool v1\n' >"$T/rel/tool-v1-x86_64/sub/tool"
+  chmod +x "$T/rel/tool-v1-x86_64/sub/tool"
+  tar -czf "$T/tool.tar.gz" -C "$T/rel" tool-v1-x86_64
+  printf '%s  tool.tar.gz\n%s  other.tar.gz\n' "$(sha256sum "$T/tool.tar.gz" | cut -d' ' -f1)" deadbeef >"$T/checksums.txt"
+}
+
+@test "release_sha256 picks the named file from a checksums list" {
+  make_release
+  [ "$(release_sha256 "file://$T/checksums.txt" tool.tar.gz)" = "$(sha256sum "$T/tool.tar.gz" | cut -d' ' -f1)" ]
+  [ -z "$(release_sha256 "file://$T/checksums.txt" missing.tar.gz)" ]
+}
+
+@test "install_release_binary installs a nested binary when the checksum matches" {
+  make_release
+  install_release_binary "file://$T/tool.tar.gz" tool "$(release_sha256 "file://$T/checksums.txt" tool.tar.gz)"
+  [ "$("$HOME/.local/bin/tool")" = "tool v1" ]
+}
+
+@test "install_release_binary refuses a tampered archive and installs nothing" {
+  make_release
+  run install_release_binary "file://$T/tool.tar.gz" tool 0000000000000000000000000000000000000000000000000000000000000000
+  [ "$status" -ne 0 ]
+  [ ! -e "$HOME/.local/bin/tool" ]
+}
+
+@test "install_release_binary fails when the archive lacks the binary" {
+  make_release
+  run install_release_binary "file://$T/tool.tar.gz" nothere
+  [ "$status" -ne 0 ]
+}

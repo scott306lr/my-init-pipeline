@@ -91,3 +91,38 @@ github_latest_tag() {
   url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$1/releases/latest")" || return 1
   printf '%s\n' "${url##*/}"
 }
+
+# machine_arch — x86_64 or aarch64 (dies on anything else); Actions map it to
+# each project's own asset naming.
+machine_arch() {
+  case "$(uname -m)" in
+    x86_64 | amd64) echo x86_64 ;;
+    aarch64 | arm64) echo aarch64 ;;
+    *) die "unsupported architecture: $(uname -m)" ;;
+  esac
+}
+
+# release_sha256 CHECKSUMS_URL FILE — FILE's hash from a "<sha256>  <file>" list.
+release_sha256() {
+  curl -fsSL --retry 3 "$1" | awk -v f="$2" '$2 == f || $2 == "*" f { print $1; exit }'
+}
+
+# install_release_binary URL BIN [SHA256] — download a .tar.gz release asset,
+# verify it when a hash is given, and install the executable named BIN (found
+# anywhere in the archive) as ~/.local/bin/BIN.
+install_release_binary() {
+  local url="$1" bin="$2" sha="${3:-}" tmp path rc=0
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/x" "$HOME/.local/bin"
+  {
+    fetch "$url" "$tmp/asset.tar.gz" &&
+      if [ -n "$sha" ]; then echo "$sha  $tmp/asset.tar.gz" | sha256sum -c -; else info "no published checksum for ${url##*/}"; fi &&
+      tar -xzf "$tmp/asset.tar.gz" -C "$tmp/x" &&
+      path="$(find "$tmp/x" -type f -name "$bin" -perm -u+x | head -n 1)" &&
+      [ -n "$path" ] &&
+      install -m 755 "$path" "$HOME/.local/bin/$bin"
+  } || rc=1
+  rm -rf "$tmp"
+  [ "$rc" = 0 ] || { warn "could not install $bin from $url"; return 1; }
+  info "installed $bin from ${url##*/}"
+}

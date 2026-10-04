@@ -73,3 +73,15 @@ session_commands() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"must be https or ssh"* ]]
 }
+
+@test "delta: sets git's pager only when none is configured" {
+  mkdir -p "$T/bin"; printf '#!/bin/sh\necho delta 0.0\n' >"$T/bin/delta"; chmod +x "$T/bin/delta"
+  PATH="$T/bin:$PATH" action delta-install run
+  [ "$(git config --global --get core.pager)" = delta ]
+  [ "$(git config --global --get interactive.diffFilter)" = "delta --color-only" ]
+
+  git config --global core.pager less
+  PATH="$T/bin:$PATH" action delta-install run
+  [ "$(git config --global --get core.pager)" = less ]
+  PATH="$T/bin:$PATH" action delta-install check
+}
