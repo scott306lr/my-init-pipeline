@@ -216,7 +216,8 @@ is_dead() { case "$1" in failed | deferred | blocked | aborted) return 0 ;; esac
 pipeline_run() {
   local -a plan=("$@")
   local -A state=() pid=() start=()
-  local s d r ready running=0 abort=0 progressed
+  local s d r ready running=0 abort=0 progressed ticker="" last_change=$SECONDS
+  local heartbeat="${MIP_HEARTBEAT:-30}"
 
   for s in "${plan[@]}"; do state[$s]=pending; done
   trap 'kill $(jobs -p) 2>/dev/null; exit 130' INT TERM
@@ -234,6 +235,7 @@ pipeline_run() {
       fi
       state[$s]="$r"; running=$((running - 1))
       report "$s" "$r" $((SECONDS - start[$s]))
+      last_change=$SECONDS
       is_satisfied "$r" || abort=1
     done
 
@@ -284,8 +286,25 @@ pipeline_run() {
 
     [ "$progressed" = 1 ] && continue
     [ "$running" -gt 0 ] || break
+    # A ticker job bounds the wait, so long silent Steps (claude-config takes
+    # minutes) still get a "still running" line instead of a frozen screen.
+    if [ -z "$ticker" ] || ! kill -0 "$ticker" 2>/dev/null; then
+      sleep "$heartbeat" &
+      ticker=$!
+    fi
     wait -n 2>/dev/null || true
+    if ! kill -0 "$ticker" 2>/dev/null && [ $((SECONDS - last_change)) -ge "$heartbeat" ]; then
+      local busy=()
+      for s in "${plan[@]}"; do
+        [ "${state[$s]}" = running ] && busy+=("$s ($((SECONDS - start[$s]))s)")
+      done
+      local joined
+      joined="$(printf '%s, ' "${busy[@]}")"
+      printf '… still running: %s\n' "${joined%, }"
+      last_change=$SECONDS
+    fi
   done
+  [ -n "$ticker" ] && kill "$ticker" 2>/dev/null
   trap - INT TERM
 
   local failed=0 n_ok=0 n_skip=0 n_left=0

@@ -13,7 +13,8 @@
 #   --non-interactive   skip Interactive Steps (and what requires them)
 #   --dry-run           print the plan with current Check results; change nothing
 #
-# Environment overrides (mainly for tests): MIP_CONF, MIP_ACTIONS_DIR, MIP_USER_CONFIG.
+# Environment overrides (mainly for tests): MIP_CONF, MIP_ACTIONS_DIR, MIP_USER_CONFIG,
+# MIP_HEARTBEAT (seconds of silence before a "still running" line; default 30).
 set -uo pipefail
 
 MIP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -138,6 +138,21 @@ setup() { setup_pipeline; }
   [ "$(line_of 'start login')" -lt "$(line_of 'end bg')" ]
 }
 
+@test "a long silent Step gets periodic 'still running' lines" {
+  step slow; step quick
+  fake_action slow --sleep 4; fake_action quick
+  MIP_HEARTBEAT=1 run mip run --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"… still running: slow ("*"s)"* ]]
+  [[ "$output" != *"still running: quick"* ]]
+}
+
+@test "no heartbeat when Steps finish within the interval" {
+  step a; fake_action a
+  MIP_HEARTBEAT=5 run mip run --non-interactive
+  [[ "$output" != *"still running"* ]]
+}
+
 @test "notes from Steps that ran are printed at the end" {
   step a; fake_action a --note "please log in"
   run mip run --non-interactive
