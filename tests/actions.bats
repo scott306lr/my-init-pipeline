@@ -85,3 +85,151 @@ session_commands() {
   [ "$(git config --global --get core.pager)" = less ]
   PATH="$T/bin:$PATH" action delta-install check
 }
+
+@test "git-identity: sets only the unset half of the identity, keeps a hand-set one" {
+  run action git-identity check
+  [ "$status" -eq 1 ]
+  git config --global user.email me@example.com
+  GIT_USER_NAME="Some One" GIT_USER_EMAIL=ignored@example.com action git-identity run
+  [ "$(git config --global --get user.name)" = "Some One" ]
+  [ "$(git config --global --get user.email)" = me@example.com ]
+  action git-identity check
+}
+
+@test "git-identity: an empty setting fails loudly instead of writing nothing" {
+  # An empty environment override falls back to config.sh's default, so blank it there.
+  printf 'GIT_USER_NAME=Some\nGIT_USER_EMAIL=\n' >"$T/config.sh"
+  run env MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/git-identity.sh" run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GIT_USER_EMAIL"* ]]
+  [ "$(git config --global --get user.name)" = Some ]
+  [ -z "$(git config --global --get user.email)" ]
+}
+
+ENV_SH='$HOME/.config/my-init-pipeline/env.sh'
+hf_exports() { grep -c '^export HF_HOME=' "$HOME/.config/my-init-pipeline/env.sh"; }
+
+@test "hf-home: HF_HOME_DIR set — no prompt; a changed setting fails the Check and is re-pointed" {
+  run action hf-home check
+  [ "$status" -eq 1 ]
+  HF_HOME_DIR="$HOME/hf" action hf-home run </dev/null
+  [ -d "$HOME/hf" ]
+  grep -qxF 'export HF_HOME="$HOME/hf"' "$HOME/.config/my-init-pipeline/env.sh"
+  HF_HOME_DIR="$HOME/hf" action hf-home check
+  action hf-home check                       # unset setting: the recorded one is fine
+  run bash -c ". $ENV_SH; echo \"\$HF_HOME\""
+  [ "$output" = "$HOME/hf" ]
+
+  run env HF_HOME_DIR="$T/data/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" check
+  [ "$status" -eq 1 ]
+  HF_HOME_DIR="$T/data/hf" action hf-home run </dev/null
+  [ "$(hf_exports)" -eq 1 ]
+  grep -qxF "export HF_HOME=\"$T/data/hf\"" "$HOME/.config/my-init-pipeline/env.sh"
+  HF_HOME_DIR="$T/data/hf" action hf-home check
+}
+
+@test "hf-home: HF_HOME_DIR empty — prompts; Enter keeps the recorded value; ~ expands; relative is refused" {
+  printf 'HF_HOME_DIR=\n' >"$T/config.sh"
+  hf() { MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" "$1"; }
+  run hf check
+  [ "$status" -eq 1 ]                        # not na: a human can answer it
+  run hf run </dev/null                      # no terminal and nothing recorded: default applies
+  [ "$status" -eq 0 ]
+  grep -qxF 'export HF_HOME="$HOME/.cache/huggingface"' "$HOME/.config/my-init-pipeline/env.sh"
+
+  printf '%s/\n' "$T/picked" | hf run
+  [ -d "$T/picked" ]
+  grep -qxF "export HF_HOME=\"$T/picked\"" "$HOME/.config/my-init-pipeline/env.sh"
+  printf '\n' | hf run
+  [ "$(hf_exports)" -eq 1 ]
+  grep -qxF "export HF_HOME=\"$T/picked\"" "$HOME/.config/my-init-pipeline/env.sh"
+  printf '~/hfx\n' | hf run
+  grep -qxF 'export HF_HOME="$HOME/hfx"' "$HOME/.config/my-init-pipeline/env.sh"
+  [ -d "$HOME/hfx" ]
+  run bash -c "printf 'rel/hf\n' | MIP_USER_CONFIG='$T/config.sh' bash '$ROOT/lib/step.sh' '$ROOT/actions/hf-home.sh' run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"absolute path"* ]]
+  hf check
+}
+
+@test "hf-home: first run moves the default cache into the chosen path and removes the old dir" {
+  mkdir -p "$HOME/.cache/huggingface/hub/models--x"; touch "$HOME/.cache/huggingface/token" "$HOME/.cache/huggingface/hub/models--x/blob"
+  HF_HOME_DIR="$T/hf" action hf-home run </dev/null
+  [ -f "$T/hf/token" ] && [ -f "$T/hf/hub/models--x/blob" ]
+  [ -L "$HOME/.cache/huggingface" ] && [ "$(readlink "$HOME/.cache/huggingface")" = "$T/hf" ]
+  [ -f "$HOME/.cache/huggingface/token" ]
+}
+
+@test "hf-home: the default-location symlink follows a re-point, is restored by the Check, and gives way to a real dir" {
+  HF_HOME_DIR="$T/a" action hf-home run </dev/null
+  [ "$(readlink "$HOME/.cache/huggingface")" = "$T/a" ]
+  touch "$T/a/token"
+  HF_HOME_DIR="$T/b" action hf-home run </dev/null
+  [ "$(readlink "$HOME/.cache/huggingface")" = "$T/b" ] && [ -f "$T/b/token" ] && [ ! -e "$T/a" ]
+
+  rm "$HOME/.cache/huggingface"
+  run env HF_HOME_DIR="$T/b" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" check
+  [ "$status" -eq 1 ]
+  HF_HOME_DIR="$T/b" action hf-home run </dev/null
+  [ "$(readlink "$HOME/.cache/huggingface")" = "$T/b" ]
+  HF_HOME_DIR="$T/b" action hf-home check
+
+  # Back to the default: the symlink becomes a real directory holding the data.
+  HF_HOME_DIR="$HOME/.cache/huggingface" action hf-home run </dev/null
+  [ -d "$HOME/.cache/huggingface" ] && [ ! -L "$HOME/.cache/huggingface" ]
+  [ -f "$HOME/.cache/huggingface/token" ] && [ ! -e "$T/b" ]
+  HF_HOME_DIR="$HOME/.cache/huggingface" action hf-home check
+  grep -qxF 'export HF_HOME="$HOME/.cache/huggingface"' "$HOME/.config/my-init-pipeline/env.sh"
+}
+
+@test "hf-home: re-pointing merges into an existing tree; a file present in both is kept and left behind" {
+  HF_HOME_DIR="$T/a" action hf-home run </dev/null
+  mkdir -p "$T/a/hub" "$T/b/hub"
+  printf old >"$T/a/token"; printf new >"$T/b/token"
+  touch "$T/a/hub/from-a" "$T/b/hub/from-b" "$T/a/.hidden"
+  run env HF_HOME_DIR="$T/b" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"kept $T/b/token"* ]]
+  [ "$(cat "$T/b/token")" = new ] && [ "$(cat "$T/a/token")" = old ]
+  [ -f "$T/b/hub/from-a" ] && [ -f "$T/b/hub/from-b" ] && [ -f "$T/b/.hidden" ]
+  [ ! -e "$T/a/hub" ] && [ ! -e "$T/a/.hidden" ]
+  grep -qxF "export HF_HOME=\"$T/b\"" "$HOME/.config/my-init-pipeline/env.sh"
+  HF_HOME_DIR="$T/b" action hf-home check
+}
+
+@test "hf-home: a path inside (or containing) a non-empty HF_HOME is refused before anything moves" {
+  HF_HOME_DIR="$T/a" action hf-home run </dev/null
+  touch "$T/a/token"
+  run env HF_HOME_DIR="$T/a/sub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
+  [ "$status" -ne 0 ] && [[ "$output" == *"inside the current HF_HOME"* ]]
+  run env HF_HOME_DIR="$T" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
+  [ "$status" -ne 0 ] && [[ "$output" == *"contains the current HF_HOME"* ]]
+  [ -f "$T/a/token" ] && [ ! -e "$T/a/sub" ]
+  HF_HOME_DIR="$T/a" action hf-home check
+  # Same path again (Enter at the prompt): nothing moves, nothing is removed.
+  printf '\n' | MIP_USER_CONFIG=<(echo 'HF_HOME_DIR=') bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run
+  [ -f "$T/a/token" ]
+}
+
+@test "hf-home: an unwritable target fails before the export changes" {
+  HF_HOME_DIR="$T/a" action hf-home run </dev/null
+  mkdir -p "$T/ro"; chmod 555 "$T/ro"
+  run env HF_HOME_DIR="$T/ro/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
+  chmod 755 "$T/ro"
+  [ "$status" -ne 0 ] && [[ "$output" == *"cannot create or write"* ]]
+  HF_HOME_DIR="$T/a" action hf-home check
+}
+
+@test "hf-home: a conflicting file left in ~/.cache/huggingface blocks the symlink and keeps the Check failing" {
+  mkdir -p "$HOME/.cache/huggingface" "$T/hf"; printf old >"$HOME/.cache/huggingface/token"; printf new >"$T/hf/token"
+  run env HF_HOME_DIR="$T/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"still has files"* ]]
+  [ ! -L "$HOME/.cache/huggingface" ] && [ "$(cat "$HOME/.cache/huggingface/token")" = old ]
+  run env HF_HOME_DIR="$T/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" check
+  [ "$status" -eq 1 ]
+  rm "$HOME/.cache/huggingface/token"
+  HF_HOME_DIR="$T/hf" action hf-home run </dev/null
+  [ "$(readlink "$HOME/.cache/huggingface")" = "$T/hf" ]
+  HF_HOME_DIR="$T/hf" action hf-home check
+}

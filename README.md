@@ -2,7 +2,7 @@
 
 One command to bring a fresh Linux server to my working setup, **without root**:
 gh, Claude Code (plus my synced `~/.claude`), Codex, herdr, uv, nvitop, zoxide,
-fzf, lazygit, delta, btop, dust and the Hugging Face CLI.
+fzf, lazygit, delta, btop, dust and the Hugging Face CLI, and sets git's commit identity.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/bootstrap.sh | bash
@@ -29,9 +29,11 @@ zoxide          zoxide-install   path-env
 fzf             fzf-install      path-env
 lazygit         lazygit-install  path-env
 delta           delta-install    path-env      # also sets git's pager, if none is set
+git-identity    git-identity                   # user.name / user.email, if unset
 btop            btop-install     path-env
 dust            dust-install     path-env
 hf              hf-install       uv
+hf-home         hf-home          path-env      # interactive unless HF_HOME_DIR is set
 herdr           herdr-install    claude-config codex
 ```
 
@@ -83,15 +85,16 @@ such as logging in to `claude` and `codex`. Full logs go to
 Rules for Actions:
 - **Checks must have no side effects.** `list` and `--dry-run` call them.
 - After `run`, the runner runs the Check again, and the Step only succeeds if it passes.
-- Never edit rc files. Use `add_path '$HOME/some/bin'` for PATH and
+- Never edit rc files. Use `add_path '$HOME/some/bin'` for PATH,
+  `add_env VAR '$HOME/value'` for an exported variable, and
   `add_shell_init '<line>'` for interactive-only setup (e.g. `eval "$(tool init bash)"`).
-  Both record into `~/.config/my-init-pipeline/env.sh`. `~/.bashrc` sources that file through one
+  All three record into `~/.config/my-init-pipeline/env.sh`. `~/.bashrc` sources that file through one
   marked block.
 - Each function runs in a fresh `bash -eo pipefail`, with `lib/common.sh` and `config.sh`
   loaded. Helpers: `have`, `info`, `die`, `fetch`, `run_installer`,
   `github_latest_tag`, `machine_arch`, `release_sha256`, `install_release_binary`
   (download a GitHub release tarball, verify its sha256 when published, install
-  one binary), `add_path`, `add_shell_init`.
+  one binary), `add_path`, `add_env`, `add_shell_init`.
 
 To swap how something is installed, point its Step at a different Action. The
 Step name and every dependency on it stay unchanged. To remove a Step, delete its
@@ -99,7 +102,7 @@ line; validation reports anything that still requires it.
 
 ## Settings
 
-`config.sh` holds the settings for `claude-config`. Each one can also be overridden from the environment:
+`config.sh` holds the settings for `claude-config`, `git-identity` and `hf-home`. Each one can also be overridden from the environment:
 
 | Variable | Default | |
 |---|---|---|
@@ -107,6 +110,9 @@ line; validation reports anything that still requires it.
 | `CLAUDE_SETUP_DIR` | `~/my-claude-setup` | where it is cloned |
 | `CLAUDE_SETUP_PROTOCOL` | `https` | `https` (via gh's credential helper) or `ssh` (needs a key on GitHub) |
 | `CLAUDE_SETUP_REF` | *(default branch)* | branch for a fresh clone, e.g. to test a change before merging it |
+| `GIT_USER_NAME` | `scott306lr` | git `user.name`, written only if `~/.gitconfig` has none |
+| `GIT_USER_EMAIL` | `scott306lr@gmail.com` | git `user.email`, likewise |
+| `HF_HOME_DIR` | *(empty: asked on the terminal)* | exported as `HF_HOME` for every shell, e.g. `/data/hf`. Change it later with `./init.sh run --force hf-home hf-home`; the previous location's contents are moved into the new one and `~/.cache/huggingface` becomes a symlink to it |
 
 Both protocols work because the setup repo records its GitHub marketplaces as
 `owner/repo` (its ADR 0006); Claude Code tries SSH first, then HTTPS.

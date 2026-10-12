@@ -49,6 +49,20 @@ setup() {
   [[ "$output" == *"[1]"* ]]
 }
 
+@test "add_env exports for every shell, keeps \$HOME unexpanded, and replaces an old value" {
+  add_env MIP_VAR '$HOME/one'
+  add_env MIP_VAR '$HOME/one'
+  [ "$(grep -c MIP_VAR "$MIP_ENV_FILE")" -eq 1 ]
+  env_has_env MIP_VAR '$HOME/one'
+  run bash -c ". '$MIP_ENV_FILE'; echo \"\$MIP_VAR\""
+  [ "$output" = "$HOME/one" ]
+  add_env MIP_VAR '$HOME/two'
+  [ "$(grep -c MIP_VAR "$MIP_ENV_FILE")" -eq 1 ]
+  ! env_has_env MIP_VAR '$HOME/one'
+  env_has_env MIP_VAR '$HOME/two'
+  [ "$MIP_VAR" = "$HOME/two" ]
+}
+
 # A local release tarball with the binary nested like dust's/delta's layouts.
 make_release() {
   mkdir -p "$T/rel/tool-v1-x86_64/sub"
