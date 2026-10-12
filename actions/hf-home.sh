@@ -42,7 +42,7 @@ run() {
     nested "$src" "$dir" && die "$dir contains the current HF_HOME $src; pick a path outside it"
     sources+=("$src")
   done
-  mkdir -p "$dir" && [ -w "$dir" ] || die "cannot create or write to $dir"
+  if ! mkdir -p "$dir" || [ ! -w "$dir" ]; then die "cannot create or write to $dir"; fi
   shopt -s nullglob dotglob
   for src in "${sources[@]}"; do
     info "moving the contents of $src to $dir (a different disk takes a while)"
