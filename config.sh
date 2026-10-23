@@ -19,3 +19,7 @@ GIT_USER_EMAIL="${GIT_USER_EMAIL:-scott306lr@gmail.com}"
 # e.g. /data/hf for a big disk. Empty: the hf-home Step asks on the terminal instead
 # (and is deferred in a non-interactive Run).
 HF_HOME_DIR="${HF_HOME_DIR:-}"
+
+# Python versions the python Step installs as uv-managed interpreters (space-separated).
+# These ship their own C headers, unlike a system Python without its -dev package.
+MANAGED_PYTHON_VERSIONS="${MANAGED_PYTHON_VERSIONS:-3.10 3.12}"

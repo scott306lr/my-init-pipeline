@@ -233,3 +233,54 @@ hf_exports() { grep -c '^export HF_HOME=' "$HOME/.config/my-init-pipeline/env.sh
   [ "$(readlink "$HOME/.cache/huggingface")" = "$T/hf" ]
   HF_HOME_DIR="$T/hf" action hf-home check
 }
+
+# fake_uv — a uv on PATH whose `python install V...` marks each V installed under
+# $T/py and whose `python find --system --python-preference only-managed V` succeeds
+# only for those. Like the real uv, it rejects --managed-python while
+# UV_PYTHON_PREFERENCE is set.
+fake_uv() {
+  mkdir -p "$T/bin" "$T/py"
+  cat >"$T/bin/uv" <<'SH'
+#!/bin/bash
+echo "uv $*" >>"$T/events"
+if [ -n "$UV_PYTHON_PREFERENCE" ] && [[ " $* " == *" --managed-python "* ]]; then exit 2; fi
+case "$1 $2" in
+  "python install") shift 2; for v in "$@"; do touch "$T/py/$v"; done ;;
+  "python find") [ "$3 $4 $5" = "--system --python-preference only-managed" ] && [ -f "$T/py/$6" ] && echo "$T/py/$6" ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$T/bin/uv"
+}
+
+@test "python: installs every configured version and exports UV_PYTHON_PREFERENCE=only-managed" {
+  fake_uv
+  run env PATH="$T/bin:$PATH" bash "$ROOT/lib/step.sh" "$ROOT/actions/python-install.sh" check
+  [ "$status" -eq 1 ]
+  PATH="$T/bin:$PATH" action python-install run
+  grep -qxF 'uv python install 3.10 3.12' "$T/events"
+  grep -qxF 'export UV_PYTHON_PREFERENCE="only-managed"' "$HOME/.config/my-init-pipeline/env.sh"
+  PATH="$T/bin:$PATH" action python-install check
+  run bash -c ". $ENV_SH; echo \"\$UV_PYTHON_PREFERENCE\""
+  [ "$output" = only-managed ]
+}
+
+@test "python: the Check fails while a version or the export is missing; an empty setting fails loudly" {
+  fake_uv
+  touch "$T/py/3.10" "$T/py/3.12"
+  run env PATH="$T/bin:$PATH" bash "$ROOT/lib/step.sh" "$ROOT/actions/python-install.sh" check
+  [ "$status" -eq 1 ]                        # installed, but uv would still pick a system Python
+  PATH="$T/bin:$PATH" action python-install run
+  PATH="$T/bin:$PATH" action python-install check
+  run env PATH="$T/bin:$PATH" MANAGED_PYTHON_VERSIONS="3.12 3.13" bash "$ROOT/lib/step.sh" "$ROOT/actions/python-install.sh" check
+  [ "$status" -eq 1 ]
+  PATH="$T/bin:$PATH" MANAGED_PYTHON_VERSIONS="3.12 3.13" action python-install run
+  grep -qxF 'uv python install 3.12 3.13' "$T/events"
+  PATH="$T/bin:$PATH" MANAGED_PYTHON_VERSIONS="3.12 3.13" action python-install check
+  [ "$(grep -c '^export UV_PYTHON_PREFERENCE=' "$HOME/.config/my-init-pipeline/env.sh")" -eq 1 ]
+
+  printf 'MANAGED_PYTHON_VERSIONS=\n' >"$T/config.sh"
+  run env PATH="$T/bin:$PATH" MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/python-install.sh" run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MANAGED_PYTHON_VERSIONS"* ]]
+}

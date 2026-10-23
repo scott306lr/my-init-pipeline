@@ -2,7 +2,8 @@
 
 One command to bring a fresh Linux server to my working setup, **without root**:
 gh, Claude Code (plus my synced `~/.claude`), Codex, herdr, uv, nvitop, zoxide,
-fzf, lazygit, delta, btop, dust and the Hugging Face CLI, and sets git's commit identity.
+fzf, lazygit, delta, btop, dust and the Hugging Face CLI, plus uv-managed Pythons
+(with C headers), and sets git's commit identity.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/bootstrap.sh | bash
@@ -25,6 +26,7 @@ claude-config   claude-config    claude gh-auth
 codex           codex-install    path-env
 uv              uv-install       path-env
 nvitop          nvitop-install   uv
+python          python-install   uv            # managed CPython (with headers); uv prefers it
 zoxide          zoxide-install   path-env
 fzf             fzf-install      path-env
 lazygit         lazygit-install  path-env
@@ -102,7 +104,7 @@ line; validation reports anything that still requires it.
 
 ## Settings
 
-`config.sh` holds the settings for `claude-config`, `git-identity` and `hf-home`. Each one can also be overridden from the environment:
+`config.sh` holds the settings for `claude-config`, `git-identity`, `hf-home` and `python`. Each one can also be overridden from the environment:
 
 | Variable | Default | |
 |---|---|---|
@@ -113,6 +115,7 @@ line; validation reports anything that still requires it.
 | `GIT_USER_NAME` | `scott306lr` | git `user.name`, written only if `~/.gitconfig` has none |
 | `GIT_USER_EMAIL` | `scott306lr@gmail.com` | git `user.email`, likewise |
 | `HF_HOME_DIR` | *(empty: asked on the terminal)* | exported as `HF_HOME` for every shell, e.g. `/data/hf`. Change it later with `./init.sh run --force hf-home hf-home`; the previous location's contents are moved into the new one and `~/.cache/huggingface` becomes a symlink to it |
+| `MANAGED_PYTHON_VERSIONS` | `3.10 3.12` | installed with `uv python install`; `UV_PYTHON_PREFERENCE=only-managed` is exported so `uv venv` / `uv sync` use them (they have `Python.h`) instead of a system Python that may lack its `-dev` package |
 
 Both protocols work because the setup repo records its GitHub marketplaces as
 `owner/repo` (its ADR 0006); Claude Code tries SSH first, then HTTPS.
