@@ -123,13 +123,19 @@ move_downloads() {
 }
 
 # join_group DST — in a folder shared through its group (setgid and group
-# writable, no ACL), give your entries that group and group write, as if they
-# had been created there. Blob payloads stay read-only. An ACL-shared folder is
+# writable, no ACL), give your entries that group and group write and drop any
+# ACL they brought along, as if they had been created there. Blob payloads stay read-only. An ACL-shared folder is
 # left to share_hf_cache.
 join_group() {
   local dst="$1" grp
   if share_hf_cache --check "$dst" || ! group_shared "$dst"; then return 0; fi
   grp="$(stat -c %G "$dst")"
+  # Entries from a home with a default ACL carry it along, and on an entry with
+  # an ACL `chmod g+…` moves only the mask. The folder has none, so neither
+  # should what lands in it.
+  if have setfacl && [ -z "$(getfacl -p --skip-base "$dst" 2>/dev/null)" ]; then
+    find "$dst" -user "$(id -u)" ! -type l -exec setfacl -b {} +
+  fi
   find "$dst" -user "$(id -u)" ! -group "$grp" -exec chgrp -h "$grp" {} +
   find "$dst" -user "$(id -u)" -type d -exec chmod g+rwxs {} +
   find "$dst" -user "$(id -u)" -type f ! -path '*/blobs/*' -exec chmod g+rw {} +

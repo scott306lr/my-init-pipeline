@@ -67,6 +67,9 @@ as carol 'echo c >>/srv/team/hf/hub/models--z/f && echo c >>/srv/team/hf/dataset
 # and their moved downloads join the group, so other members can update them.
 useradd -m erin; groupadd team; usermod -aG team erin; usermod -aG team carol
 mkdir -p /srv/grp/hf/hub /srv/grp/hf/datasets && chgrp -R team /srv/grp && chmod -R 2775 /srv/grp
+# erin's home hands down a default ACL, as the CI runner's homes do (it is what
+# exposed the mask problem): moved entries must not keep it.
+setfacl -d -m u:carol:rx,g::r-x /home/erin
 as erin 'mkdir -p ~/.cache/huggingface/datasets/ds___g && echo g >~/.cache/huggingface/datasets/ds___g/f'
 login erin "HF_CACHE_DIR=/srv/grp/hf /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 \
   || { cat /tmp/run.out /home/erin/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-cache failed on a group-shared folder"; }
