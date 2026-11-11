@@ -125,6 +125,21 @@ setup() { setup_pipeline; }
   grep -q 'end needs-ask' "$T/events"
 }
 
+@test "an Interactive Step whose Check does not apply is n/a, with or without a terminal; dependents run" {
+  step off; step after off
+  fake_action off --interactive --na; fake_action after
+  run mip run --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"off "*"na"* ]] && [[ "$output" != *"deferred"* ]]
+  grep -q 'end after' "$T/events"
+  : >"$T/events"; rm -f "$T/state/after"
+  command -v script >/dev/null || skip "util-linux script not available"
+  run script -qec "$ROOT/init.sh run -y" /dev/null
+  [ "$status" -eq 0 ]
+  ! grep -q 'start off' "$T/events"
+  grep -q 'end after' "$T/events"
+}
+
 @test "non-interactive: satisfied Interactive Step counts as done" {
   step login; step needs-login login
   fake_action login --interactive; fake_action needs-login

@@ -206,23 +206,21 @@ step_job() {
   printf '%s\n' "${out:-failed}" >"$RUN_DIR/$step.result"
 }
 
-# Interactive Steps own the terminal: no redirection, so prompts and tty
-# detection work. Only the runner's own bookkeeping goes to the log. They have
-# nothing to upgrade, so upgrade mode is install mode here.
+# step_foreground STEP — run an Interactive Step that has work to do (the
+# scheduler has already made the Check decision). It owns the terminal: no
+# redirection, so prompts and tty detection work. Only the runner's own
+# bookkeeping goes to the log. Interactive Steps have nothing to upgrade, so
+# upgrade mode is install mode for them.
 step_foreground() {
-  local step="$1" mode="$2" rc=0 result
+  local step="$1" rc=0 result
   echo "== $step (interactive) $(date '+%F %T')" >>"$RUN_DIR/$step.log"
-  if [ "$mode" != force ] && [ "$(check_status "$step")" = "done" ]; then
-    result="done"
+  printf '▶ %s (interactive)\n' "$step"
+  step_call "$step" run </dev/tty || rc=$?
+  if [ "$rc" = 0 ] && [ "$(check_status "$step")" = "done" ]; then
+    result=ran
+    step_call "$step" note ran >"$RUN_DIR/$step.note" 2>/dev/null || true
   else
-    printf '▶ %s (interactive)\n' "$step"
-    step_call "$step" run </dev/tty || rc=$?
-    if [ "$rc" = 0 ] && [ "$(check_status "$step")" = "done" ]; then
-      result=ran
-      step_call "$step" note ran >"$RUN_DIR/$step.note" 2>/dev/null || true
-    else
-      result=failed
-    fi
+    result=failed
   fi
   echo "RESULT $result" >>"$RUN_DIR/$step.log"
   printf '%s\n' "$result" >"$RUN_DIR/$step.result"
@@ -309,12 +307,19 @@ pipeline_run() {
         [ "$ready" = 1 ] || continue
 
         if is_interactive "$s"; then
-          if [ "$MIP_INTERACTIVE" != 1 ]; then
-            if [ "${STEP_MODE[$s]:-install}" != force ] && [ "$(check_status "$s")" = "done" ]; then r="done"; else r=deferred; fi
-          else
+          # An Interactive Step whose Check passes (done) or does not apply (na)
+          # needs no human; only one with work to do takes the terminal.
+          r=todo
+          if [ "${STEP_MODE[$s]:-install}" != force ]; then r="$(check_status "$s")"; fi
+          if [ "$r" = todo ] && [ "$MIP_INTERACTIVE" != 1 ]; then
+            r=deferred
+          elif [ "$r" = todo ]; then
             start[$s]=$SECONDS
-            step_foreground "$s" "${STEP_MODE[$s]:-install}"
+            step_foreground "$s"
             r="$(cat "$RUN_DIR/$s.result")"
+          else
+            echo "== $s (interactive) $(date '+%F %T')" >>"$RUN_DIR/$s.log"
+            echo "RESULT $r" >>"$RUN_DIR/$s.log"
           fi
           state[$s]="$r"; report "$s" "$r"
           is_satisfied "$r" || { [ "$r" = failed ] && abort=1; }
