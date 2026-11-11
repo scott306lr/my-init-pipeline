@@ -37,7 +37,7 @@ pick_steps() {
     st="$(check_status "$s")"
     case "$st" in done | na) mark="$st" ;; *) mark="" ;; esac
     # gum splits --selected on commas, so labels carry none.
-    label="$(printf '%-15s %-4s  %s' "$s" "$mark" "$(action_field "$s" summary | tr ',' ';' | cut -c 1-72)")"
+    label="$(printf '%-15s %-4s  %s' "$s" "$mark" "$(step_summary "$s" | tr ',' ';' | cut -c 1-72)")"
     opts+=("$label"$'\t'"$s")
     if [ "$st" = todo ]; then ticked+=("$label"); fi
   done

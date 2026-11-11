@@ -21,6 +21,9 @@ GIT_USER_EMAIL="${GIT_USER_EMAIL:-scott306lr@gmail.com}"
 # Empty: the hf-cache Step asks on the terminal instead (and is deferred in a
 # non-interactive Run).
 HF_HUB_CACHE_DIR="${HF_HUB_CACHE_DIR:-}"
+# Share HF_HUB_CACHE_DIR with the other users in this group: the hf-share Step,
+# the only one that needs sudo. Empty (the default): off, and the Step is n/a.
+HF_SHARE_GROUP="${HF_SHARE_GROUP:-}"
 
 # Python versions the python Step installs as uv-managed interpreters (space-separated).
 # These ship their own C headers, unlike a system Python without its -dev package.

@@ -6,7 +6,8 @@
 #   sudo admin/share-hf-cache.sh DIR GROUP [USER...]
 #   curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- DIR GROUP [USER...]
 #
-# Creates GROUP and adds each USER; makes DIR group-writable with the setgid bit
+# Creates GROUP and adds each USER; creates DIR if missing (owned by the user
+# who ran sudo); makes DIR group-writable with the setgid bit
 # (new entries inherit GROUP) and a default ACL (new entries stay group-writable
 # whatever each user's umask); lets GROUP traverse every parent of DIR that
 # others cannot; and exports HF_HUB_CACHE=DIR for every user's login shells
@@ -33,7 +34,12 @@ main() {
   getent group "$group" >/dev/null || groupadd "$group"
   for u in "$@"; do usermod -aG "$group" "$u"; done
 
-  mkdir -p "$dir"
+  # A directory created here belongs to whoever ran sudo, so they can use it
+  # before a fresh login puts their shells in the group.
+  if [ ! -d "$dir" ]; then
+    mkdir -p "$dir"
+    if [ -n "${SUDO_USER:-}" ]; then chown "$SUDO_USER" "$dir"; fi
+  fi
   chgrp -R "$group" "$dir"
   chmod -R o-w "$dir"
   find "$dir" -type d -exec chmod u+rwx,g+rwxs {} +
@@ -57,7 +63,8 @@ main() {
 
   ls -ld "$dir"
   echo "HF_HUB_CACHE=$dir for every user from their next login; members of $group: $(getent group "$group" | cut -d: -f4)"
-  echo "Users of my-init-pipeline: log in again, then run it; the hf-cache Step offers $dir as the default."
+  echo "Users of my-init-pipeline: log in again, then run it; the hf-cache Step offers $dir as the default"
+  echo "(or set HF_SHARE_GROUP=$group and HF_HUB_CACHE_DIR=$dir: its hf-share Step then checks this setup)."
 }
 
 die() { echo "error: $*" >&2; exit 1; }

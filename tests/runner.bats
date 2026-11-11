@@ -252,6 +252,15 @@ setup() { setup_pipeline; }
   [ "$status" -ne 0 ] && [[ "$output" == *"could not fast-forward"* ]] && [[ "$output" != *"fake a"* ]]
 }
 
+@test "list and the picker mark a Step whose header says sudo: yes" {
+  step a; step b
+  fake_action a
+  printf '%s\n' '# summary: needs root' '# sudo: yes' 'check() { return 1; }' 'run() { :; }' >"$MIP_ACTIONS_DIR/b.sh"
+  run mip list
+  [[ "$output" == *"[sudo] needs root"* ]]
+  [[ "$output" != *"[sudo] fake a"* ]]
+}
+
 @test "validation: unknown requirement, cycle, missing action, duplicate" {
   step a nope; fake_action a
   run mip run --non-interactive

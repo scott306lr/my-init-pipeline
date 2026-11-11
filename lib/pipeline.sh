@@ -118,6 +118,15 @@ action_field() {
   action_header "$1" | sed -n "s/^$2:[[:space:]]*//p" | head -n 1
 }
 
+# step_summary STEP — the header summary, marked "[sudo]" for a Step whose
+# header says `sudo: yes` (the pipeline's only exception to running without root).
+step_summary() {
+  local s
+  s="$(action_field "$1" summary)"
+  if [ "$(action_field "$1" sudo)" = yes ]; then s="[sudo] $s"; fi
+  printf '%s\n' "$s"
+}
+
 # is_interactive STEP — true if the Step needs a human now: its header says
 # `interactive: yes` and its interactive() function, if it defines one, agrees.
 # An Action defines interactive() when a setting can answer its prompt, so a

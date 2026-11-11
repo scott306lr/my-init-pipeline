@@ -42,7 +42,7 @@ run() {
   fi
   case "$dir" in /*) ;; *) die "HF_HUB_CACHE must be an absolute path: $dir" ;; esac
   [ -n "$legacy" ] && restore_home "$legacy"
-  if ! mkdir -p "$dir" || [ ! -w "$dir" ]; then die "cannot create or write to $dir"; fi
+  if ! mkdir -p "$dir" || [ ! -w "$dir" ]; then die "cannot create or write to $dir (just added to its group? log in again, then re-run)"; fi
   old="${old:-$HF_HOME_DEFAULT/hub}"
   if [ -d "$old" ] && [ -n "$(ls -A "$old")" ] && ! [ "$old" -ef "$dir" ]; then
     warn "downloads in $old were not moved to $dir; delete them when no longer needed"

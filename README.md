@@ -1,6 +1,7 @@
 # my-init-pipeline
 
-One command to bring a fresh Linux server to my working setup, **without root**:
+One command to bring a fresh Linux server to my working setup, **without root**
+(one opt-in Step, marked `[sudo]`, is the exception):
 gh, Claude Code (plus my synced `~/.claude`), Codex, herdr, uv, nvitop, zoxide,
 fzf, lazygit, delta, btop, dust and the Hugging Face CLI, plus uv-managed Pythons
 (with C headers), and sets git's commit identity.
@@ -37,7 +38,8 @@ git-identity    git-identity                   # user.name / user.email, if unse
 btop            btop-install     path-env
 dust            dust-install     path-env
 hf              hf-install       uv
-hf-cache        hf-cache         path-env      # interactive unless HF_HUB_CACHE_DIR is set
+hf-share        hf-share                       # [sudo], n/a unless HF_SHARE_GROUP is set
+hf-cache        hf-cache         path-env hf-share   # interactive unless HF_HUB_CACHE_DIR is set
 herdr           herdr-install    claude-config codex
 ```
 
@@ -112,7 +114,7 @@ line; validation reports anything that still requires it.
 
 ## Settings
 
-`config.sh` holds the settings for `claude-config`, `git-identity`, `hf-cache` and `python`. Each one can also be overridden from the environment:
+`config.sh` holds the settings for `claude-config`, `git-identity`, `hf-cache`, `hf-share` and `python`. Each one can also be overridden from the environment:
 
 | Variable | Default | |
 |---|---|---|
@@ -123,6 +125,7 @@ line; validation reports anything that still requires it.
 | `GIT_USER_NAME` | `scott306lr` | git `user.name`, written only if `~/.gitconfig` has none |
 | `GIT_USER_EMAIL` | `scott306lr@gmail.com` | git `user.email`, likewise |
 | `HF_HUB_CACHE_DIR` | *(empty: asked on the terminal)* | exported as `HF_HUB_CACHE` (model and dataset downloads) for every shell, e.g. `/data/hf/hub`. `HF_HOME` is left at `~/.cache/huggingface`, so the token stays private. Change it later with `./init.sh run --force hf-cache hf-cache`; existing downloads are not moved |
+| `HF_SHARE_GROUP` | *(empty: off)* | share `HF_HUB_CACHE_DIR` with this group's users: the `hf-share` Step runs `admin/share-hf-cache.sh` with sudo (see below) |
 | `MANAGED_PYTHON_VERSIONS` | `3.10 3.12` | installed with `uv python install`; `UV_PYTHON_PREFERENCE=only-managed` is exported so `uv venv` / `uv sync` use them (they have `Python.h`) instead of a system Python that may lack its `-dev` package |
 
 Both protocols work because the setup repo records its GitHub marketplaces as
@@ -131,8 +134,21 @@ Both protocols work because the setup repo records its GitHub marketplaces as
 ## Sharing the Hugging Face cache between users
 
 Models are big, so users of one machine can share a hub cache while each keeps
-their own `HF_HOME` (token, login state). On each new server, root runs this once,
-no clone needed:
+their own `HF_HOME` (token, login state). Setting it up needs root once per server.
+
+**If you have sudo**, set both settings and let the Pipeline do it:
+
+```bash
+HF_HUB_CACHE_DIR=/shared/huggingface_cache/hub HF_SHARE_GROUP=hf ./init.sh run hf-share hf-cache
+```
+
+The `hf-share` Step prints the sudo command before running it and asks for a
+password only if sudo needs one (passwordless sudo works without a terminal). It
+adds you to the group; a directory it creates is yours. Later users with the same
+settings pass its Check without sudo once an admin has added them to the group.
+Set the two in `config.sh` to keep them. Log in again afterwards to join the group.
+
+**Otherwise**, root runs the same script directly, no clone needed:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh \
