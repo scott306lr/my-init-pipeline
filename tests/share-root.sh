@@ -21,12 +21,33 @@ set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root on a throwaway machine" >&2; exit 2; }
 # A copy every test user can read (a checkout under a home directory may not be).
 rm -rf /opt/mip && cp -r "$1" /opt/mip && chmod -R a+rX /opt/mip
-fail() { echo "FAIL: $*"; exit 1; }
+# fail MESSAGE — stop, first showing the last Pipeline Run (its output and
+# Step logs), which is what a failure here usually needs.
+ran_as=""
+fail() {
+  if [ -n "$ran_as" ]; then
+    cat /tmp/run.out
+    cat "/home/$ran_as/.local/state/my-init-pipeline/runs/latest/"*.log 2>/dev/null || true
+  fi
+  echo "FAIL: $*"
+  exit 1
+}
 # login USER CMD — a login shell for USER. The CI runner's /etc/environment
 # sets XDG_CONFIG_HOME to the runner account's folder (runner-images
 # configure-environment.sh), which no test user can write; drop it.
 login() { su - "$1" -c "unset XDG_CONFIG_HOME; $2"; }
 as() { login "$1" "umask 077; $2"; }
+# pipeline USER SETTINGS STEP... — USER runs those Steps, with no terminal;
+# what the Run prints goes to /tmp/run.out. SETTINGS are VAR=value words.
+pipeline() {
+  ran_as="$1"
+  login "$1" "$2 /opt/mip/init.sh run ${*:3} </dev/null" >/tmp/run.out 2>&1
+}
+# ran STEP... — the last Run reports each STEP as ran.
+ran() {
+  local s
+  for s in "$@"; do grep -q "$s  *ran" /tmp/run.out || fail "$s did not run"; done
+}
 for u in alice bob carol dave; do useradd -m "$u"; done
 mkdir -p /srv/locked && chmod 700 /srv/locked
 
@@ -59,8 +80,8 @@ bash /opt/mip/admin/share-hf-cache.sh relative 2>/dev/null && fail "a relative D
 mkdir -p /srv/team && chmod 1777 /srv/team
 cfg='HF_CACHE_DIR=/srv/team/hf HF_CACHE_SHARED=yes'
 as dave 'mkdir -p ~/.cache/huggingface/hub/models--z ~/.cache/huggingface/datasets/ds___z && echo z >~/.cache/huggingface/hub/models--z/f && echo z >~/.cache/huggingface/datasets/ds___z/f'
-login dave "$cfg /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 || { cat /tmp/run.out /home/dave/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-cache run failed"; }
-grep -q 'hf-cache *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-cache did not run"; }
+pipeline dave "$cfg" hf-cache || fail "hf-cache run failed"
+ran hf-cache
 login dave "$cfg bash /opt/mip/lib/step.sh /opt/mip/actions/hf-cache.sh check" || fail "hf-cache Check fails after sharing"
 as dave 'mkdir -p /srv/team/hf/hub/models--y && echo d >/srv/team/hf/hub/models--y/f'
 as carol 'echo c >>/srv/team/hf/hub/models--y/f && mkdir /srv/team/hf/hub/models--y/sub' || fail "another user cannot write the shared cache"
@@ -76,29 +97,25 @@ mkdir -p /srv/grp/hf/hub /srv/grp/hf/datasets && chgrp -R team /srv/grp && chmod
 # exposed the mask problem): moved entries must not keep it.
 setfacl -d -m u:carol:rx,g::r-x /home/erin
 as erin 'mkdir -p ~/.cache/huggingface/datasets/ds___g && echo g >~/.cache/huggingface/datasets/ds___g/f'
-login erin "HF_CACHE_DIR=/srv/grp/hf /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 \
-  || { cat /tmp/run.out /home/erin/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-cache failed on a group-shared folder"; }
-grep -q 'hf-cache *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-cache did not run on a group-shared folder"; }
+pipeline erin HF_CACHE_DIR=/srv/grp/hf hf-cache || fail "hf-cache failed on a group-shared folder"
+ran hf-cache
 [ "$(stat -c %G /srv/grp/hf/datasets/ds___g/f)" = team ] || fail "moved download did not join the folder's group"
 as carol 'echo c >>/srv/grp/hf/datasets/ds___g/f' || {
   ls -la /srv/grp/hf/datasets /srv/grp/hf/datasets/ds___g; getfacl -p /srv/grp/hf/datasets/ds___g; id carol; su - carol -c id
-  cat /home/erin/.local/state/my-init-pipeline/runs/latest/hf-cache.log
   fail "another member cannot update a moved download"
 }
 getfacl -p /srv/grp/hf | grep -q '^default:' && fail "a folder someone else owns got an ACL"
 # Leaving it again: other members' downloads stay.
 as carol 'mkdir -p /srv/grp/hf/hub/models--c && echo c >/srv/grp/hf/hub/models--c/f'
-login erin "HF_CACHE_DIR=/home/erin/hf /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 \
-  || { cat /tmp/run.out; fail "could not point erin at a private folder"; }
+pipeline erin HF_CACHE_DIR=/home/erin/hf hf-cache || fail "could not point erin at a private folder"
 [ -e /srv/grp/hf/hub/models--c/f ] || fail "leaving a group-shared folder took another member's downloads"
 
 # The optional hf-export Step, named (tests/runner.bats covers skipping it when
 # not chosen). dave has passwordless sudo, so it runs without a terminal.
 command -v sudo >/dev/null || { apt-get install -y -qq sudo >/dev/null 2>&1 || apt-get update -qq && apt-get install -y -qq sudo >/dev/null; }
 echo 'dave ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/dave
-login dave "/opt/mip/init.sh run hf-export </dev/null" >/tmp/run.out 2>&1 \
-  || { cat /tmp/run.out /home/dave/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-export run failed"; }
-grep -q 'hf-export *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-export did not run"; }
+pipeline dave "" hf-export || fail "hf-export run failed"
+ran hf-export
 [ "$(login carol 'echo $HF_HUB_CACHE $HF_DATASETS_CACHE')" = "/srv/team/hf/hub /srv/team/hf/datasets" ] \
   || fail "a new login does not get the exported cache folder"
 # A folder only root can prepare (lrspark: root made it root:root 755 and handed
@@ -106,15 +123,12 @@ grep -q 'hf-export *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-export did
 # hf-export; with hf-export in the same Run, root prepares the folder first.
 useradd -m frank; echo 'frank ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/frank
 mkdir -p /srv/rootown/hf/hub && chmod 755 /srv/rootown /srv/rootown/hf && chown frank /srv/rootown/hf/hub
-login frank "HF_CACHE_DIR=/srv/rootown/hf /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 \
-  && { cat /tmp/run.out; fail "hf-cache succeeded on a folder only root can prepare"; }
-grep -q 'tick hf-export' /home/frank/.local/state/my-init-pipeline/runs/latest/hf-cache.log \
-  || { cat /home/frank/.local/state/my-init-pipeline/runs/latest/hf-cache.log; fail "hf-cache did not point to hf-export"; }
-login frank "HF_CACHE_DIR=/srv/rootown/hf /opt/mip/init.sh run hf-export hf-cache </dev/null" >/tmp/run.out 2>&1 \
-  || { cat /tmp/run.out /home/frank/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-export + hf-cache failed"; }
-if ! grep -q 'hf-export *ran' /tmp/run.out || ! grep -q 'hf-cache *ran' /tmp/run.out; then cat /tmp/run.out; fail "not both ran"; fi
+pipeline frank HF_CACHE_DIR=/srv/rootown/hf hf-cache && fail "hf-cache succeeded on a folder only root can prepare"
+grep -q 'tick hf-export' /home/frank/.local/state/my-init-pipeline/runs/latest/hf-cache.log || fail "hf-cache did not point to hf-export"
+pipeline frank HF_CACHE_DIR=/srv/rootown/hf hf-export hf-cache || fail "hf-export + hf-cache failed"
+ran hf-export hf-cache
 [ "$(grep -n 'hf-export *ran' /tmp/run.out | cut -d: -f1)" -lt "$(grep -n 'hf-cache *ran' /tmp/run.out | cut -d: -f1)" ] \
-  || { cat /tmp/run.out; fail "hf-cache ran before hf-export"; }
+  || fail "hf-cache ran before hf-export"
 as carol 'mkdir /srv/rootown/hf/datasets/ds___f' || fail "the prepared folder is not shared"
 [ "$(login carol 'echo $HF_DATASETS_CACHE')" = /srv/rootown/hf/datasets ] || fail "the prepared folder is not exported"
 

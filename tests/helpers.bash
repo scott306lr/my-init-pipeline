@@ -1,7 +1,19 @@
 # Shared fixtures: a throwaway HOME plus a fake Pipeline whose Actions record
 # what they did in $T/events and mark themselves "installed" via $T/state/<name>.
 
+bats_require_minimum_version 1.12.0   # run -N, bats::on_failure (tests/run.sh pins the version)
+
 ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+
+# When a test fails, show the Step logs of the last Run it made, if it made one.
+bats::on_failure() {
+  local log
+  for log in "$HOME/.local/state/my-init-pipeline/runs/latest"/*.log; do
+    [ -f "$log" ] || continue
+    echo "--- $log"
+    cat "$log"
+  done
+}
 
 setup_pipeline() {
   export T="$BATS_TEST_TMPDIR"

@@ -2,7 +2,6 @@
 # Runner behaviour against fake Actions: ordering, parallelism, skip/force,
 # failure handling, interactive Steps, validation, list/describe.
 
-bats_require_minimum_version 1.5.0   # run -N
 load helpers
 
 setup() { setup_pipeline; }
