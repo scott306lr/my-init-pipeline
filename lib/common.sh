@@ -27,6 +27,12 @@ root_outside_container() {
 # in_home DIR — true if DIR is your home directory or lies below it.
 in_home() { [[ "$(realpath -m "$1")/" == "$(realpath -m "$HOME")/"* ]]; }
 
+# hf_cache_root HUB DATASETS — the cache folder holding both, when HUB is
+# <folder>/hub and DATASETS is <folder>/datasets; else nothing.
+hf_cache_root() {
+  case "$1" in */hub) if [ "$2" = "${1%/hub}/datasets" ]; then printf '%s\n' "${1%/hub}"; fi ;; esac
+}
+
 # share_hf_cache [--check | --exported] DIR — admin/share-hf-cache.sh: share DIR
 # with every user (as its owner), or ask whether it is shared / exported.
 share_hf_cache() { bash "$MIP_ROOT/admin/share-hf-cache.sh" "$@"; }

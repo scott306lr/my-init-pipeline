@@ -5,8 +5,8 @@ load helpers
 
 setup() {
   setup_pipeline
-  unset HF_HUB_CACHE HF_HOME   # the developer's own Hugging Face settings
-  export HF_HUB_CACHE_SUGGESTED="$T/suggested/hub"   # never the real /shared
+  unset HF_HUB_CACHE HF_DATASETS_CACHE HF_HOME   # the developer's own Hugging Face settings
+  export HF_CACHE_SUGGESTED="$T/suggested"   # never the real /shared
   export MIP_USER_CONFIG="$ROOT/config.sh"
   mkdir -p "$HOME/.claude" "$T/repo"
   # settings.json is a symlink into the setup repo, as claude-config leaves it.
@@ -152,118 +152,149 @@ ENV_SH='$HOME/.config/my-init-pipeline/env.sh'
 envf() { printf '%s\n' "$HOME/.config/my-init-pipeline/env.sh"; }
 hfc() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" "$1"; }
 
-@test "hf-cache: HF_HUB_CACHE_DIR set — no prompt; exports only HF_HUB_CACHE; a changed setting is re-pointed" {
-  run action hf-cache check
-  [ "$status" -eq 1 ]
-  HF_HUB_CACHE_DIR="$HOME/hub" action hf-cache run </dev/null
-  [ -d "$HOME/hub" ]
-  grep -qxF 'export HF_HUB_CACHE="$HOME/hub"' "$(envf)"
-  ! grep -q '^export HF_HOME=' "$(envf)"
-  HF_HUB_CACHE_DIR="$HOME/hub" action hf-cache check
-  action hf-cache check                      # unset setting: the recorded one is fine
-  run bash -c ". $ENV_SH; echo \"\$HF_HUB_CACHE\""
-  [ "$output" = "$HOME/hub" ]
-
-  run env HF_HUB_CACHE_DIR="$T/shared/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" check
-  [ "$status" -eq 1 ]
-  HF_HUB_CACHE_DIR="$T/shared/hub" action hf-cache run </dev/null
-  [ "$(grep -c '^export HF_HUB_CACHE=' "$(envf)")" -eq 1 ]
-  grep -qxF "export HF_HUB_CACHE=\"$T/shared/hub\"" "$(envf)"
-  HF_HUB_CACHE_DIR="$T/shared/hub" action hf-cache check
+# exports ROOT — env.sh points HF_HUB_CACHE and HF_DATASETS_CACHE into ROOT (as written there).
+exports() {
+  grep -qxF "export HF_HUB_CACHE=\"$1/hub\"" "$(envf)" && grep -qxF "export HF_DATASETS_CACHE=\"$1/datasets\"" "$(envf)"
 }
 
-@test "hf-cache: HF_HUB_CACHE_DIR empty — prompts; Enter keeps the recorded value; ~ expands; relative is refused" {
-  printf 'HF_HUB_CACHE_DIR=\n' >"$T/config.sh"
+@test "hf-cache: HF_CACHE_DIR set — no prompt; exports hub/ and datasets/ in it; a changed setting is re-pointed" {
+  run action hf-cache check
+  [ "$status" -eq 1 ]
+  HF_CACHE_DIR="$HOME/hf" action hf-cache run </dev/null
+  [ -d "$HOME/hf/hub" ] && [ -d "$HOME/hf/datasets" ]
+  exports '$HOME/hf'
+  ! grep -q '^export HF_HOME=' "$(envf)"
+  HF_CACHE_DIR="$HOME/hf" action hf-cache check
+  action hf-cache check                      # unset setting: the recorded one is fine
+  run bash -c ". $ENV_SH; echo \"\$HF_HUB_CACHE \$HF_DATASETS_CACHE\""
+  [ "$output" = "$HOME/hf/hub $HOME/hf/datasets" ]
+
+  run env HF_CACHE_DIR="$T/srv" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" check
+  [ "$status" -eq 1 ]
+  HF_CACHE_DIR="$T/srv" HF_CACHE_SHARED=no action hf-cache run </dev/null
+  [ "$(grep -c '^export HF_HUB_CACHE=' "$(envf)")" -eq 1 ] && [ "$(grep -c '^export HF_DATASETS_CACHE=' "$(envf)")" -eq 1 ]
+  exports "$T/srv"
+  HF_CACHE_DIR="$T/srv" action hf-cache check
+}
+
+@test "hf-cache: HF_CACHE_DIR empty — prompts; Enter keeps the recorded folder; ~ expands; relative is refused" {
+  printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
   export MIP_USER_CONFIG="$T/config.sh"
   run hfc check
   [ "$status" -eq 1 ]                        # not na: a human can answer it
   run hfc run </dev/null                     # no terminal and nothing recorded: the suggestion applies
   [ "$status" -eq 0 ]
-  grep -qxF "export HF_HUB_CACHE=\"$T/suggested/hub\"" "$(envf)"
+  exports "$T/suggested"
   printf '%s/\n' "$T/picked" | hfc run
-  grep -qxF "export HF_HUB_CACHE=\"$T/picked\"" "$(envf)"
+  exports "$T/picked"
   printf '\n' | hfc run
-  grep -qxF "export HF_HUB_CACHE=\"$T/picked\"" "$(envf)"
-  printf '~/hubx\n' | hfc run
-  grep -qxF 'export HF_HUB_CACHE="$HOME/hubx"' "$(envf)"
-  run bash -c "printf 'rel/hub\n' | bash '$ROOT/lib/step.sh' '$ROOT/actions/hf-cache.sh' run"
+  exports "$T/picked"
+  printf '~/hfx\n' | hfc run
+  exports '$HOME/hfx'
+  run bash -c "printf 'rel/hf\n' | bash '$ROOT/lib/step.sh' '$ROOT/actions/hf-cache.sh' run"
   [ "$status" -ne 0 ]
   [[ "$output" == *"absolute path"* ]]
   hfc check
 }
 
-@test "hf-cache: needs no human once its settings answer every question; the prompt defaults to a system-wide HF_HUB_CACHE" {
-  run env HF_HUB_CACHE_DIR=/x HF_HUB_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" interactive
+@test "hf-cache: needs no human once its settings answer every question; the prompt defaults to a system-wide cache folder" {
+  run env HF_CACHE_DIR=/x HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" interactive
   [ "$status" -eq 1 ]
-  printf 'HF_HUB_CACHE_DIR=\n' >"$T/config.sh"
+  printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
   export MIP_USER_CONFIG="$T/config.sh"
   hfc interactive
   HF_HUB_CACHE="$T/sys/hub" hfc run </dev/null
-  grep -qxF "export HF_HUB_CACHE=\"$T/sys/hub\"" "$(envf)"
+  exports "$T/sys"
 }
 
-@test "hf-cache: re-pointing leaves existing downloads where they are, with a warning" {
-  mkdir -p "$HOME/.cache/huggingface/hub/models--x"
-  run env HF_HUB_CACHE_DIR="$T/shared/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"were not moved"* ]]
-  [ -d "$HOME/.cache/huggingface/hub/models--x" ] && [ -z "$(ls -A "$T/shared/hub")" ]
+@test "hf-cache: an earlier HF_HUB_CACHE=<folder>/hub becomes the folder; nothing in it moves" {
+  mkdir -p "$T/old/hub/models--x" "$HOME/.config/my-init-pipeline"
+  printf 'export HF_HUB_CACHE="%s/hub"\n' "$T/old" >"$(envf)"
+  printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
+  run hfc check
+  [ "$status" -eq 1 ]                        # no HF_DATASETS_CACHE yet
+  MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  exports "$T/old"
+  [ -d "$T/old/hub/models--x" ] && [ -d "$T/old/datasets" ]
 }
 
-@test "hf-cache: an unwritable target fails before the export changes" {
-  HF_HUB_CACHE_DIR="$T/a" action hf-cache run </dev/null
+@test "hf-cache: re-pointing moves your hub and datasets downloads; snapshot links still resolve" {
+  local h="$HOME/.cache/huggingface"
+  mkdir -p "$h/hub/models--x/snapshots/abc" "$h/hub/blobs/12" "$h/datasets/ds___y/0.0.0"
+  echo weights >"$h/hub/blobs/12/1234"
+  ln -s ../../../blobs/12/1234 "$h/hub/models--x/snapshots/abc/model.safetensors"
+  echo arrow >"$h/datasets/ds___y/0.0.0/data.arrow"
+  run env HF_CACHE_DIR="$T/new" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  [ "$status" -eq 0 ] && [[ "$output" == *"moving $h/hub into $T/new/hub"* ]]
+  [ "$(cat "$T/new/hub/models--x/snapshots/abc/model.safetensors")" = weights ]
+  [ "$(cat "$T/new/datasets/ds___y/0.0.0/data.arrow")" = arrow ]
+  [ ! -e "$h/hub" ] && [ ! -e "$h/datasets" ]
+  exports "$T/new"
+}
+
+@test "hf-cache: moving merges; an entry the new folder already has is kept there and left behind" {
+  mkdir -p "$T/a/hub/models--x/refs" "$T/b/hub/models--x/refs" "$T/a/datasets" "$T/b/datasets" "$HOME/.config/my-init-pipeline"
+  printf 'export HF_HUB_CACHE="%s/hub"\nexport HF_DATASETS_CACHE="%s/datasets"\n' "$T/a" "$T/a" >"$(envf)"
+  echo old >"$T/a/hub/models--x/refs/main"; echo new >"$T/b/hub/models--x/refs/main"
+  touch "$T/a/hub/models--x/refs/pr-1" "$T/b/hub/models--x/refs/pr-2"
+  run env HF_CACHE_DIR="$T/b" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  [ "$status" -eq 0 ] && [[ "$output" == *"1 entries were already in $T/b/hub"* ]]
+  [ "$(cat "$T/b/hub/models--x/refs/main")" = new ] && [ "$(cat "$T/a/hub/models--x/refs/main")" = old ]
+  [ -e "$T/b/hub/models--x/refs/pr-1" ] && [ -e "$T/b/hub/models--x/refs/pr-2" ]
+  exports "$T/b"
+}
+
+@test "hf-cache: an unwritable target fails before the exports change" {
+  HF_CACHE_DIR="$T/a" HF_CACHE_SHARED=no action hf-cache run </dev/null
   mkdir -p "$T/ro"; chmod 555 "$T/ro"
-  run env HF_HUB_CACHE_DIR="$T/ro/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  run env HF_CACHE_DIR="$T/ro/hf" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
   chmod 755 "$T/ro"
   [ "$status" -ne 0 ] && [[ "$output" == *"cannot create or write"* ]]
-  grep -qxF "export HF_HUB_CACHE=\"$T/a\"" "$(envf)"
+  exports "$T/a"
 }
 
-@test "hf-cache: undoes a relocated HF_HOME — token back in a private ~/.cache/huggingface, hub left, export dropped" {
+@test "hf-cache: undoes a relocated HF_HOME — token back in a private ~/.cache/huggingface, caches left, export dropped" {
   # What the former hf-home Step left: a shared HF_HOME, exported and symlinked.
-  mkdir -p "$T/shared/hub/models--x" "$T/shared/xet" "$HOME/.cache" "$HOME/.config/my-init-pipeline"
+  mkdir -p "$T/shared/hub/models--x" "$T/shared/datasets/d" "$T/shared/xet" "$HOME/.cache" "$HOME/.config/my-init-pipeline"
   printf tok >"$T/shared/token"; touch "$T/shared/stored_tokens"
   ln -s "$T/shared" "$HOME/.cache/huggingface"
   printf 'export HF_HOME="%s"\n' "$T/shared" >"$(envf)"
-  run env HF_HUB_CACHE_DIR="$T/shared/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" check
+  run env HF_CACHE_DIR="$T/shared" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" check
   [ "$status" -eq 1 ]
-  HF_HUB_CACHE_DIR="$T/shared/hub" action hf-cache run </dev/null
+  HF_CACHE_DIR="$T/shared" HF_CACHE_SHARED=no action hf-cache run </dev/null
   [ -d "$HOME/.cache/huggingface" ] && [ ! -L "$HOME/.cache/huggingface" ]
   [ "$(stat -c %a "$HOME/.cache/huggingface")" = 700 ]
   [ "$(cat "$HOME/.cache/huggingface/token")" = tok ] && [ -f "$HOME/.cache/huggingface/stored_tokens" ] && [ -d "$HOME/.cache/huggingface/xet" ]
-  [ ! -e "$T/shared/token" ] && [ -d "$T/shared/hub/models--x" ]
+  [ ! -e "$T/shared/token" ] && [ -d "$T/shared/hub/models--x" ] && [ -d "$T/shared/datasets/d" ]
   ! grep -q '^export HF_HOME=' "$(envf)"
-  HF_HUB_CACHE_DIR="$T/shared/hub" action hf-cache check
+  HF_CACHE_DIR="$T/shared" action hf-cache check
 }
 
-@test "hf-cache: the prompt defaults to the relocated HF_HOME's hub; a name already at home is left in place" {
+@test "hf-cache: the prompt defaults to the relocated HF_HOME; a name already at home is left in place" {
   mkdir -p "$T/old/hub" "$HOME/.cache/huggingface" "$HOME/.config/my-init-pipeline"
   printf old >"$T/old/token"; printf new >"$HOME/.cache/huggingface/token"
   printf 'export HF_HOME="%s"\n' "$T/old" >"$(envf)"
-  printf 'HF_HUB_CACHE_DIR=\n' >"$T/config.sh"
+  printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
   run env MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"left $T/old/token"* ]]
   [ "$(cat "$HOME/.cache/huggingface/token")" = new ] && [ "$(cat "$T/old/token")" = old ]
-  grep -qxF "export HF_HUB_CACHE=\"$T/old/hub\"" "$(envf)"
+  exports "$T/old"
   ! grep -q '^export HF_HOME=' "$(envf)"
 }
 
-@test "hf-cache: the suggestion keeps existing downloads in ~/.cache/huggingface/hub, and falls back when it cannot be created" {
-  printf 'HF_HUB_CACHE_DIR=\nHF_HUB_CACHE_SHARED=no\n' >"$T/config.sh"
+@test "hf-cache: the suggestion is HF_CACHE_SUGGESTED when you can create it, else ~/.cache/huggingface" {
+  printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
   export MIP_USER_CONFIG="$T/config.sh"
   mkdir -p "$T/ro"; chmod 555 "$T/ro"
-  HF_HUB_CACHE_SUGGESTED="$T/ro/shared/hub" hfc run </dev/null     # not creatable: HF's default
+  HF_CACHE_SUGGESTED="$T/ro/shared" hfc run </dev/null     # not creatable: HF's default
   chmod 755 "$T/ro"
-  grep -qxF 'export HF_HUB_CACHE="$HOME/.cache/huggingface/hub"' "$(envf)"
+  exports '$HOME/.cache/huggingface'
   rm "$(envf)"
-  hfc run </dev/null                         # no downloads yet: the suggestion
-  grep -qxF "export HF_HUB_CACHE=\"$T/suggested/hub\"" "$(envf)"
+  hfc run </dev/null
+  exports "$T/suggested"
   rm "$(envf)"
-  mkdir -p "$HOME/.cache/huggingface/hub/models--x"
-  hfc run </dev/null                         # downloads already there: kept
-  grep -qxF 'export HF_HUB_CACHE="$HOME/.cache/huggingface/hub"' "$(envf)"
-  run env HF_HUB_CACHE_SUGGESTED= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  run env HF_CACHE_SUGGESTED= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
   [ "$status" -eq 0 ]                        # an empty setting falls back too
 }
 
@@ -353,55 +384,66 @@ fake_uv_bin() {
 }
 
 
-# Sharing (no root needed: you own the directory).
-share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >"$T/config.sh"; export MIP_USER_CONFIG="$T/config.sh"; }
+# Sharing (no root needed: you own the folder).
+share_cfg() { printf 'HF_CACHE_DIR=%s\nHF_CACHE_SHARED=%s\n' "$1" "$2" >"$T/config.sh"; export MIP_USER_CONFIG="$T/config.sh"; }
+shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep -qx 'default:other::rwx'; }
 
-@test "hf-cache: HF_HUB_CACHE_SHARED=yes shares a directory outside home with everyone; the Check requires it" {
+@test "hf-cache: HF_CACHE_SHARED=yes shares a folder outside home (hub/ and datasets/) with everyone; the Check requires it" {
   command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
-  share_cfg "$T/srv/hub" yes
+  share_cfg "$T/srv" yes
   run hfc interactive
   [ "$status" -eq 1 ]                        # both answered: no human needed
   hfc run </dev/null
-  getfacl -p "$T/srv/hub" | grep -qx 'other::rwx'
-  getfacl -p "$T/srv/hub" | grep -qx 'default:other::rwx'
+  shared_dir "$T/srv" && shared_dir "$T/srv/hub" && shared_dir "$T/srv/datasets"
   hfc check
   run hfc note                               # not exported system-wide here: say how
   [[ "$output" == *"./init.sh run hf-export"* ]]
-  setfacl -b "$T/srv/hub"; chmod 755 "$T/srv/hub"
+  setfacl -b "$T/srv"; chmod 755 "$T/srv"
   run hfc check
   [ "$status" -eq 1 ]
 }
 
+@test "hf-cache: downloads moved into a shared folder become everyone's too; a shared old cache is left alone" {
+  command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
+  mkdir -p "$HOME/.cache/huggingface/hub/models--x/refs"
+  echo abc >"$HOME/.cache/huggingface/hub/models--x/refs/main"; chmod 600 "$HOME/.cache/huggingface/hub/models--x/refs/main"
+  share_cfg "$T/srv" yes
+  hfc run </dev/null
+  shared_dir "$T/srv/hub/models--x/refs"
+  getfacl -p "$T/srv/hub/models--x/refs/main" | grep -qx 'other::rw-'
+  # Back to a private folder: the shared one keeps everything.
+  share_cfg "$HOME/mine" no
+  run hfc run </dev/null
+  [[ "$output" == *"is shared with other users, so its downloads stay there"* ]]
+  [ -e "$T/srv/hub/models--x/refs/main" ]
+}
+
 @test "hf-cache: asks whether to share only outside home and only if not shared; n keeps it private" {
   command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
-  share_cfg "$T/srv/hub" ""
+  share_cfg "$T/srv" ""
   hfc interactive                            # the question is open
   printf 'n\n' | hfc run
-  ! getfacl -p "$T/srv/hub" | grep -qx 'default:other::rwx'
+  ! shared_dir "$T/srv"
   hfc check                                  # unset setting: private is fine
   printf '\n' | hfc run                     # Enter: yes
-  getfacl -p "$T/srv/hub" | grep -qx 'default:other::rwx'
+  shared_dir "$T/srv"
   run hfc interactive                        # shared now: nothing to ask
   [ "$status" -eq 1 ]
-  share_cfg "$HOME/hub" ""
+  share_cfg "$HOME/hf" ""
   run hfc interactive                        # inside home: never asked
   [ "$status" -eq 1 ]
 }
 
-@test "hf-export: n/a only for a cache in your home; work to do before hf-cache ran, and until shared and exported" {
+@test "hf-export: n/a only for a cache folder in your home; work to do before hf-cache ran, and until shared and exported" {
   run env HF_HUB_CACHE= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
-  [ "$status" -eq 1 ]                        # fresh server: offered, hf-cache will record the directory
-  run env HF_HUB_CACHE="$HOME/.cache/huggingface/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  [ "$status" -eq 1 ]                        # fresh server: offered, hf-cache will record the folder
+  run env HF_HUB_CACHE="$HOME/hf/hub" HF_DATASETS_CACHE="$HOME/hf/datasets" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
   [ "$status" -eq 2 ]
-  mkdir -p "$T/priv"
-  run env HF_HUB_CACHE="$T/priv" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  mkdir -p "$T/priv/hub" "$T/priv/datasets"
+  run env HF_HUB_CACHE="$T/priv/hub" HF_DATASETS_CACHE="$T/priv/datasets" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
   [ "$status" -eq 1 ]                        # outside home, not shared: root shares and exports it
-  run env HF_HUB_CACHE= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run
+  run env HF_HUB_CACHE="$T/priv/hub" HF_DATASETS_CACHE= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run
   [ "$status" -ne 0 ] && [[ "$output" == *"run the hf-cache Step first"* ]]
-  command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
-  bash "$ROOT/admin/share-hf-cache.sh" "$T/srv/hub" >/dev/null
-  run env HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
-  [ "$status" -eq 1 ]                        # /etc/profile.d does not export this test directory
 }
 
 @test "hf-export: a terminal only when sudo needs a password; without one it never lets sudo prompt" {
@@ -412,10 +454,11 @@ share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >
   [ "$status" -eq 1 ]
   SUDO_RC=1 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" interactive
   : >"$T/sudo.calls"
-  run env SUDO_RC=0 HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  export HF_HUB_CACHE="$T/srv/hub" HF_DATASETS_CACHE="$T/srv/datasets"
+  run env SUDO_RC=0 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
   [ "$status" -eq 0 ]
-  grep -qxF -- "-n bash $ROOT/admin/share-hf-cache.sh $T/srv/hub" "$T/sudo.calls"
-  run env SUDO_RC=1 HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  grep -qxF -- "-n bash $ROOT/admin/share-hf-cache.sh $T/srv" "$T/sudo.calls"
+  run env SUDO_RC=1 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
   [ "$status" -ne 0 ] && [[ "$output" == *"run it on a terminal: ./init.sh run hf-export"* ]]
 }
 
@@ -424,12 +467,12 @@ share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >
   mkdir -p "$T/bin"
   printf '#!/bin/sh\necho "$*" >>"%s/sudo.calls"\nexit "${SUDO_RC:-0}"\n' "$T" >"$T/bin/sudo"; chmod +x "$T/bin/sudo"
   export PATH="$T/bin:$PATH"
-  on_tty() { script -qec "env SUDO_RC=$1 HF_HUB_CACHE=$T/srv/hub bash $ROOT/lib/step.sh $ROOT/actions/hf-export.sh run" /dev/null; }
+  on_tty() { script -qec "env SUDO_RC=$1 HF_HUB_CACHE=$T/srv/hub HF_DATASETS_CACHE=$T/srv/datasets bash $ROOT/lib/step.sh $ROOT/actions/hf-export.sh run" /dev/null; }
   run on_tty 0
-  [ "$status" -eq 0 ] && [[ "$output" == *"hf-export needs sudo: sudo bash $ROOT/admin/share-hf-cache.sh $T/srv/hub"* ]]
-  grep -qxF "bash $ROOT/admin/share-hf-cache.sh $T/srv/hub" "$T/sudo.calls"
+  [ "$status" -eq 0 ] && [[ "$output" == *"hf-export needs sudo: sudo bash $ROOT/admin/share-hf-cache.sh $T/srv"* ]]
+  grep -qxF "bash $ROOT/admin/share-hf-cache.sh $T/srv" "$T/sudo.calls"
   run on_tty 1
-  [ "$status" -ne 0 ] && [[ "$output" == *"ask an admin to run: curl"*"sudo bash -s -- $T/srv/hub"* ]]
+  [ "$status" -ne 0 ] && [[ "$output" == *"ask an admin to run: curl"*"sudo bash -s -- $T/srv"* ]]
 }
 
 @test "codex: the Check needs codex's config directory; run creates it private without reinstalling" {

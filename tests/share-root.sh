@@ -2,13 +2,16 @@
 # Sharing the hub cache with every user, as root on a throwaway machine (it adds
 # users and writes /etc/profile.d): run by tests/admin.sh, in ubuntu:22.04
 # locally and directly on the CI runner.
-#   - root runs admin/share-hf-cache.sh: users with umask 077 add, update and
-#     replace each other's entries through a 700 parent, a login shell carries
-#     HF_HUB_CACHE, a re-run stacks nothing and leaves blobs read-only;
-#   - a user runs the hf-cache Step on a directory they create: it is shared
-#     without sudo, and a user who never ran anything can write to it;
-#   - the optional hf-export Step, named, makes that directory every user's
-#     HF_HUB_CACHE with sudo;
+#   - root runs admin/share-hf-cache.sh on a cache folder: users with umask 077
+#     add, update and replace each other's entries in hub/ and datasets/
+#     through a 700 parent, a login shell carries HF_HUB_CACHE and
+#     HF_DATASETS_CACHE, the old export file goes, a re-run stacks nothing and
+#     leaves blobs read-only;
+#   - a user runs the hf-cache Step on a folder they create: it is shared
+#     without sudo, their private downloads move in and are writable by
+#     others, and a user who never ran anything can write to it;
+#   - the optional hf-export Step, named, makes that folder every user's cache
+#     with sudo;
 #   - init.sh refuses root on a real machine, not in a container.
 #
 #   tests/share-root.sh REPO_DIR    (as root)
@@ -25,28 +28,38 @@ as() { login "$1" "umask 077; $2"; }
 for u in alice bob carol dave; do useradd -m "$u"; done
 mkdir -p /srv/locked && chmod 700 /srv/locked
 
-bash /opt/mip/admin/share-hf-cache.sh /srv/locked/hub
-bash /opt/mip/admin/share-hf-cache.sh --check /srv/locked/hub || fail "--check fails after sharing"
+echo 'export HF_HUB_CACHE=/old' >/etc/profile.d/hf-hub-cache.sh   # the export's name before datasets/
+bash /opt/mip/admin/share-hf-cache.sh /srv/locked/hf
+bash /opt/mip/admin/share-hf-cache.sh --check /srv/locked/hf || fail "--check fails after sharing"
+[ ! -e /etc/profile.d/hf-hub-cache.sh ] || fail "the old export file was left behind"
 as alice 'mkdir -p "$HF_HUB_CACHE/models--x/refs" "$HF_HUB_CACHE/models--x/blobs" && echo a >"$HF_HUB_CACHE/models--x/refs/main"' \
   || fail "alice cannot write the cache"
 as bob 'echo b >"$HF_HUB_CACHE/models--x/refs/main" && touch "$HF_HUB_CACHE/models--x/blobs/g"' \
   || fail "bob cannot update what alice created (both umask 077)"
 as carol 'mv "$HF_HUB_CACHE/models--x/refs/main" "$HF_HUB_CACHE/models--x/refs/old"' || fail "carol cannot replace an entry"
-[ "$(as alice 'echo $HF_HUB_CACHE')" = /srv/locked/hub ] || fail "HF_HUB_CACHE missing from a login shell"
-chmod 444 /srv/locked/hub/models--x/blobs/g
-bash /opt/mip/admin/share-hf-cache.sh /srv/locked/hub >/dev/null
-[ "$(grep -c '^HF_HUB_CACHE=' /etc/environment)" = 1 ] || fail "re-run stacked /etc/environment"
-[ "$(stat -c %a /srv/locked/hub/models--x/blobs/g)" = 444 ] || fail "a re-run made a blob writable"
+[ "$(as alice 'echo $HF_HUB_CACHE $HF_DATASETS_CACHE')" = "/srv/locked/hf/hub /srv/locked/hf/datasets" ] \
+  || fail "HF_HUB_CACHE / HF_DATASETS_CACHE missing from a login shell"
+as alice 'mkdir -p "$HF_DATASETS_CACHE/ds___y" && echo a >"$HF_DATASETS_CACHE/ds___y/data.arrow"' || fail "alice cannot write the datasets cache"
+as bob 'echo b >>"$HF_DATASETS_CACHE/ds___y/data.arrow"' || fail "bob cannot update alice's datasets cache entry"
+chmod 444 /srv/locked/hf/hub/models--x/blobs/g
+bash /opt/mip/admin/share-hf-cache.sh /srv/locked/hf >/dev/null
+[ "$(grep -c '^HF_HUB_CACHE=' /etc/environment)" = 1 ] && [ "$(grep -c '^HF_DATASETS_CACHE=' /etc/environment)" = 1 ] \
+  || fail "re-run stacked /etc/environment"
+[ "$(stat -c %a /srv/locked/hf/hub/models--x/blobs/g)" = 444 ] || fail "a re-run made a blob writable"
 bash /opt/mip/admin/share-hf-cache.sh relative 2>/dev/null && fail "a relative DIR was accepted"
 
-# The hf-cache Step, as a user, no sudo: dave creates and shares /srv/team/hub.
+# The hf-cache Step, as a user, no sudo: dave creates and shares /srv/team/hf,
+# moving his private downloads into it.
 mkdir -p /srv/team && chmod 1777 /srv/team
-cfg='HF_HUB_CACHE_DIR=/srv/team/hub HF_HUB_CACHE_SHARED=yes'
+cfg='HF_CACHE_DIR=/srv/team/hf HF_CACHE_SHARED=yes'
+as dave 'mkdir -p ~/.cache/huggingface/hub/models--z ~/.cache/huggingface/datasets/ds___z && echo z >~/.cache/huggingface/hub/models--z/f && echo z >~/.cache/huggingface/datasets/ds___z/f'
 login dave "$cfg /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 || { cat /tmp/run.out /home/dave/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-cache run failed"; }
 grep -q 'hf-cache *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-cache did not run"; }
 login dave "$cfg bash /opt/mip/lib/step.sh /opt/mip/actions/hf-cache.sh check" || fail "hf-cache Check fails after sharing"
-as dave 'mkdir -p /srv/team/hub/models--y && echo d >/srv/team/hub/models--y/f'
-as carol 'echo c >>/srv/team/hub/models--y/f && mkdir /srv/team/hub/models--y/sub' || fail "another user cannot write the shared cache"
+as dave 'mkdir -p /srv/team/hf/hub/models--y && echo d >/srv/team/hf/hub/models--y/f'
+as carol 'echo c >>/srv/team/hf/hub/models--y/f && mkdir /srv/team/hf/hub/models--y/sub' || fail "another user cannot write the shared cache"
+as carol 'echo c >>/srv/team/hf/hub/models--z/f && echo c >>/srv/team/hf/datasets/ds___z/f' || fail "dave's moved downloads are not writable by others"
+[ ! -e /home/dave/.cache/huggingface/hub/models--z ] || fail "dave's downloads were not moved"
 
 # The optional hf-export Step, named (tests/runner.bats covers skipping it when
 # not chosen). dave has passwordless sudo, so it runs without a terminal.
@@ -55,7 +68,8 @@ echo 'dave ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/dave
 login dave "/opt/mip/init.sh run hf-export </dev/null" >/tmp/run.out 2>&1 \
   || { cat /tmp/run.out /home/dave/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-export run failed"; }
 grep -q 'hf-export *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-export did not run"; }
-[ "$(login carol 'echo $HF_HUB_CACHE')" = /srv/team/hub ] || fail "a new login does not get the exported HF_HUB_CACHE"
+[ "$(login carol 'echo $HF_HUB_CACHE $HF_DATASETS_CACHE')" = "/srv/team/hf/hub /srv/team/hf/datasets" ] \
+  || fail "a new login does not get the exported cache folder"
 # Root: refused on a real machine, allowed in a container or CI job. An unknown
 # Step name shows which: the refusal comes before the Pipeline is read.
 /opt/mip/init.sh run no-such-step >/tmp/root.out 2>&1 && fail "init.sh accepted an unknown Step"

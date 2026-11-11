@@ -1,109 +1,157 @@
-# summary: Export HF_HUB_CACHE (Hugging Face model and dataset downloads): HF_HUB_CACHE_DIR from config.sh, else asked on the terminal
-# check:   env.sh exports HF_HUB_CACHE (equal to HF_HUB_CACHE_DIR when set) and you can write to it (and it is shared, when HF_HUB_CACHE_SHARED=yes); HF_HOME is not exported and ~/.cache/huggingface is a real directory
+# summary: Put Hugging Face downloads (hub/) and the datasets cache (datasets/) in one cache folder: HF_CACHE_DIR from config.sh, else asked on the terminal
+# check:   env.sh exports HF_HUB_CACHE=<folder>/hub and HF_DATASETS_CACHE=<folder>/datasets (the folder equal to HF_CACHE_DIR when set), both writable (and shared, when HF_CACHE_SHARED=yes); HF_HOME is not exported and ~/.cache/huggingface is a real directory
 # interactive: yes
-# notes:   Only the hub cache is relocated. HF_HOME stays at its default,
-#          ~/.cache/huggingface, so the login token (and other per-user state)
-#          never lands on a shared or big disk. The Run asks for the directory,
-#          defaulting to the HF_HUB_CACHE already in effect (recorded here, or
-#          exported system-wide), else existing downloads in
-#          ~/.cache/huggingface/hub, else HF_HUB_CACHE_SUGGESTED if you can
-#          create it, else ~/.cache/huggingface/hub; unless HF_HUB_CACHE_DIR is
-#          set. For a
-#          directory outside your home that is not shared yet, it also asks
-#          whether to share it with every user of the server, unless
-#          HF_HUB_CACHE_SHARED (yes/no) answers; sharing runs
-#          admin/share-hf-cache.sh as you, no sudo. With both answered the Step
-#          runs without a terminal. Re-pointing does not move existing
-#          downloads (they are re-fetched on use). An HF_HOME export or ~/.cache/huggingface symlink
-#          left by the former hf-home Step is undone: the entries you own at its
-#          target, except hub/, move back into a real ~/.cache/huggingface, and
-#          that hub/ becomes the prompt's default.
+# notes:   The cache folder is laid out like HF_HOME (hub/ for models and
+#          datasets downloaded from the Hub, datasets/ for the datasets
+#          library's Arrow cache) but never holds the login token: HF_HOME
+#          stays at ~/.cache/huggingface. The Run asks for the folder, defaulting
+#          to the one already in effect (recorded here, or exported system-wide),
+#          else HF_CACHE_SUGGESTED if you can create it, else
+#          ~/.cache/huggingface; unless HF_CACHE_DIR is set. For a folder
+#          outside your home that is not shared yet, it also asks whether to
+#          share it with every user of the server, unless HF_CACHE_SHARED
+#          (yes/no) answers; sharing runs admin/share-hf-cache.sh as you, no
+#          sudo. With both answered the Step runs without a terminal.
+#          Re-pointing moves your downloads: what the previous hub/ and datasets/
+#          caches hold (the recorded ones, else ~/.cache/huggingface's) is merged
+#          into the new folder, keeping the new folder's copy where both have an
+#          entry, then shared again if the folder is shared. A shared previous
+#          cache is never emptied: other users' downloads live there. Moving
+#          across disks copies, which takes a while for big models; don't
+#          re-point while a download runs. An HF_HOME export or
+#          ~/.cache/huggingface symlink left by the former hf-home Step is
+#          undone: the entries you own at its target, except hub/ and datasets/,
+#          move back into a real ~/.cache/huggingface, and that target becomes
+#          the prompt's default.
 
 HF_HOME_DEFAULT="$HOME/.cache/huggingface"
 
 interactive() {
-  [ -z "$HF_HUB_CACHE_DIR" ] || { [ -z "$HF_HUB_CACHE_SHARED" ] && should_ask_to_share "$HF_HUB_CACHE_DIR"; }
+  [ -z "$HF_CACHE_DIR" ] || { [ -z "$HF_CACHE_SHARED" ] && should_ask_to_share "$HF_CACHE_DIR"; }
 }
 
 check() {
-  local dir
-  dir="$(recorded HF_HUB_CACHE)"
-  [ -n "$dir" ] && [ -d "$dir" ] && [ -w "$dir" ] &&
-    { [ -z "$HF_HUB_CACHE_DIR" ] || [ "$dir" = "$HF_HUB_CACHE_DIR" ]; } &&
+  local root
+  root="$(recorded_root)"
+  [ -n "$root" ] && [ -w "$root/hub" ] && [ -w "$root/datasets" ] &&
+    { [ -z "$HF_CACHE_DIR" ] || [ "$root" = "$HF_CACHE_DIR" ]; } &&
     [ -z "$(recorded HF_HOME)" ] && [ ! -L "$HF_HOME_DEFAULT" ] &&
-    { [ "$HF_HUB_CACHE_SHARED" != yes ] || share_hf_cache --check "$dir"; }
+    { [ "$HF_CACHE_SHARED" != yes ] || share_hf_cache --check "$root"; }
 }
 
 run() {
-  local dir="$HF_HUB_CACHE_DIR" old legacy def answer share="$HF_HUB_CACHE_SHARED"
-  case "$share" in "" | yes | no) ;; *) die "HF_HUB_CACHE_SHARED must be yes, no or empty, got '$share'" ;; esac
-  old="$(recorded HF_HUB_CACHE)"
+  local root="$HF_CACHE_DIR" legacy def answer share="$HF_CACHE_SHARED" kind src
+  local -A from=()
+  case "$share" in "" | yes | no) ;; *) die "HF_CACHE_SHARED must be yes, no or empty, got '$share'" ;; esac
+  # Where the downloads are now, before anything changes.
+  from[hub]="$(recorded HF_HUB_CACHE)"
+  from[datasets]="$(recorded HF_DATASETS_CACHE)"
   legacy="$(legacy_home)"
-  if [ -z "$dir" ]; then
-    def="${HF_HUB_CACHE:-}"   # env.sh is loaded, so the recorded value wins over the system one
-    # A relocated HF_HOME's downloads, where the former hf-home Step put them.
-    if [ -z "$def" ] && [ -n "$legacy" ] && ! [ "$legacy" -ef "$HF_HOME_DEFAULT" ] && [ -d "$legacy/hub" ]; then
-      def="$legacy/hub"
-    fi
-    def="${def:-$(suggestion)}"
-    read -r -p "HF_HUB_CACHE directory [$def]: " dir || true   # EOF: take the default
-    dir="${dir:-$def}"
-    dir="${dir/#\~/$HOME}"
-    [ "$dir" != / ] && dir="${dir%/}"
+  if [ -n "$legacy" ]; then
+    from[hub]="${from[hub]:-$legacy/hub}"
+    from[datasets]="${from[datasets]:-$legacy/datasets}"
   fi
-  case "$dir" in /*) ;; *) die "HF_HUB_CACHE must be an absolute path: $dir" ;; esac
+  from[hub]="${from[hub]:-$HF_HOME_DEFAULT/hub}"
+  from[datasets]="${from[datasets]:-$HF_HOME_DEFAULT/datasets}"
+  if [ -z "$root" ]; then
+    def="$(root_of "${HF_HUB_CACHE:-}")"   # env.sh is loaded: recorded wins over system-wide
+    if [ -z "$def" ] && [ -n "$legacy" ] && ! [ "$legacy" -ef "$HF_HOME_DEFAULT" ]; then def="$legacy"; fi
+    def="${def:-$(suggestion)}"
+    read -r -p "Hugging Face cache folder (holds hub/ and datasets/) [$def]: " root || true   # EOF: take the default
+    root="${root:-$def}"
+    root="${root/#\~/$HOME}"
+    [ "$root" != / ] && root="${root%/}"
+  fi
+  case "$root" in /*) ;; *) die "the cache folder must be an absolute path: $root" ;; esac
   [ -n "$legacy" ] && restore_home "$legacy"
-  if should_ask_to_share "$dir" && [ -z "$share" ]; then
+  if should_ask_to_share "$root" && [ -z "$share" ]; then
     # Enter shares; no answer at all (EOF) never does.
-    if read -r -p "Share $dir with every user of this server? [Y/n]: " answer; then
+    if read -r -p "Share $root with every user of this server? [Y/n]: " answer; then
       case "$answer" in [nN]*) share=no ;; *) share=yes ;; esac
     else
       share=no
     fi
   fi
-  if [ "$share" = yes ] && ! share_hf_cache --check "$dir"; then
-    share_hf_cache "$dir"
+  if ! mkdir -p "$root/hub" "$root/datasets" || [ ! -w "$root/hub" ] || [ ! -w "$root/datasets" ]; then
+    die "cannot create or write to $root/hub and $root/datasets; if someone else made $root, ask them or root to run: admin/share-hf-cache.sh $root"
   fi
-  if ! mkdir -p "$dir" || [ ! -w "$dir" ]; then
-    die "cannot create or write to $dir; if someone else made it, ask them or root to run: admin/share-hf-cache.sh $dir"
-  fi
-  old="${old:-$HF_HOME_DEFAULT/hub}"
-  if [ -d "$old" ] && [ -n "$(ls -A "$old")" ] && ! [ "$old" -ef "$dir" ]; then
-    warn "downloads in $old were not moved to $dir; delete them when no longer needed"
-  fi
-  add_env HF_HUB_CACHE "${dir/#$HOME/\$HOME}"
-  info "HF_HUB_CACHE = $dir"
+  for kind in hub datasets; do
+    src="${from[$kind]}"
+    if [ -d "$src" ] && [ -n "$(ls -A "$src")" ] && ! [ "$src" -ef "$root/$kind" ]; then
+      move_downloads "$src" "$root/$kind"
+    fi
+  done
+  # Sharing last, so it also covers whatever was just moved in.
+  if [ "$share" = yes ] || share_hf_cache --check "$root"; then share_hf_cache "$root"; fi
+  add_env HF_HUB_CACHE "${root/#$HOME/\$HOME}/hub"
+  add_env HF_DATASETS_CACHE "${root/#$HOME/\$HOME}/datasets"
+  info "HF_HUB_CACHE = $root/hub, HF_DATASETS_CACHE = $root/datasets"
 }
 
 note() {
-  local dir
-  dir="$(recorded HF_HUB_CACHE)"
+  local root
+  root="$(recorded_root)"
   # The runner inherits the shell that started it, so a stale HF_HOME shows here.
   if [ -n "${HF_HOME:-}" ]; then echo "HF_HOME is still set in this shell: run 'unset HF_HOME' or open a new terminal"; fi
   # Exporting it for users who never run this Pipeline is the optional hf-export Step.
-  if [ -n "$dir" ] && share_hf_cache --check "$dir" && ! share_hf_cache --exported "$dir"; then
-    echo "$dir is shared; to make it every user's default (needs sudo): ./init.sh run hf-export"
+  if [ -n "$root" ] && share_hf_cache --check "$root" && ! share_hf_cache --exported "$root"; then
+    echo "$root is shared; to make it every user's default (needs sudo): ./init.sh run hf-export"
   fi
+}
+
+# move_downloads SRC DST — move what SRC holds into DST, unless SRC is shared
+# (other users' downloads live there; then it is only reported).
+move_downloads() {
+  local src="$1" dst="$2" left
+  if share_hf_cache --check "$src"; then
+    info "$src is shared with other users, so its downloads stay there"
+    return
+  fi
+  info "moving $src into $dst ($(du -sh "$src" 2>/dev/null | cut -f1); across disks this copies)"
+  shopt -s nullglob dotglob
+  move_into "$src" "$dst"
+  find "$src" -depth -type d -empty -delete 2>/dev/null || true
+  if [ -e "$src" ]; then
+    left="$(find "$src" ! -type d | wc -l)"
+    warn "$left entries were already in $dst and stay behind in $src; delete them when no longer needed"
+  fi
+}
+
+# move_into SRC DST — merge SRC's entries into DST. A directory on both sides is
+# merged; any other entry already in DST is kept there and left in SRC. Hub
+# blobs are named by their content hash and snapshot links are relative, so
+# merged caches stay valid. Caller sets nullglob and dotglob.
+move_into() {
+  local src="$1" dst="$2" e name
+  for e in "$src"/*; do
+    name="${e##*/}"
+    if [ ! -e "$dst/$name" ] && [ ! -L "$dst/$name" ]; then
+      mv "$e" "$dst/"
+    elif [ -d "$e" ] && [ ! -L "$e" ] && [ -d "$dst/$name" ] && [ ! -L "$dst/$name" ]; then
+      move_into "$e" "$dst/$name"
+    fi
+  done
 }
 
 # should_ask_to_share DIR — DIR lies outside your home and is not shared yet.
 should_ask_to_share() { ! in_home "$1" && ! share_hf_cache --check "$1"; }
 
-# suggestion — what to offer when no HF_HUB_CACHE is in effect: downloads
-# already in HF's default location stay there; else HF_HUB_CACHE_SUGGESTED, if
-# you can create or write it; else HF's default.
+# suggestion — the folder to offer when none is in effect: HF_CACHE_SUGGESTED
+# if you can create or write it, else HF's default (your downloads move along).
 suggestion() {
-  local p="${HF_HUB_CACHE_SUGGESTED:-}"
-  if [ -d "$HF_HOME_DEFAULT/hub" ] && [ -n "$(ls -A "$HF_HOME_DEFAULT/hub")" ]; then
-    echo "$HF_HOME_DEFAULT/hub"
-    return
-  fi
+  local p="${HF_CACHE_SUGGESTED:-}"
   if [ -n "$p" ]; then
     while [ ! -e "$p" ]; do p="${p%/*}"; p="${p:-/}"; done   # nearest existing ancestor
-    if [ -d "$p" ] && [ -w "$p" ]; then echo "$HF_HUB_CACHE_SUGGESTED"; return; fi
+    if [ -d "$p" ] && [ -w "$p" ]; then echo "$HF_CACHE_SUGGESTED"; return; fi
   fi
-  echo "$HF_HOME_DEFAULT/hub"
+  echo "$HF_HOME_DEFAULT"
 }
+
+# recorded_root — the cache folder env.sh records, or nothing.
+recorded_root() { hf_cache_root "$(recorded HF_HUB_CACHE)" "$(recorded HF_DATASETS_CACHE)"; }
+
+# root_of HUB — the folder holding HUB when HUB ends in /hub, else nothing.
+root_of() { case "$1" in */hub) printf '%s\n' "${1%/hub}" ;; esac; }
 
 # recorded VAR — the value env.sh exports for VAR (with $HOME expanded), or nothing.
 recorded() {
@@ -123,7 +171,7 @@ legacy_home() {
 
 # restore_home DIR — make ~/.cache/huggingface a real, private directory again,
 # moving in the entries of DIR you own (token, stored_tokens, xet/, …) except
-# hub/, and drop the HF_HOME export.
+# the caches (hub/, datasets/), and drop the HF_HOME export.
 restore_home() {
   local src="$1" e
   if [ -L "$HF_HOME_DEFAULT" ]; then rm "$HF_HOME_DEFAULT"; fi
@@ -132,7 +180,7 @@ restore_home() {
   if [ -d "$src" ] && ! [ "$src" -ef "$HF_HOME_DEFAULT" ]; then
     shopt -s nullglob dotglob
     for e in "$src"/*; do
-      if [ "${e##*/}" = hub ]; then continue; fi
+      case "${e##*/}" in hub | datasets) continue ;; esac
       if [ -e "$HF_HOME_DEFAULT/${e##*/}" ] || [ ! -O "$e" ]; then warn "left $e where it is"; continue; fi
       mv "$e" "$HF_HOME_DEFAULT/"
       info "moved $e to $HF_HOME_DEFAULT"

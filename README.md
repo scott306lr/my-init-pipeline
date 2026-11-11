@@ -37,7 +37,7 @@ git-identity    git-identity                   # user.name / user.email, if unse
 btop            btop-install     path-env
 dust            dust-install     path-env
 hf              hf-install       uv
-hf-cache        hf-cache         path-env      # interactive unless HF_HUB_CACHE_DIR (and, outside home, HF_HUB_CACHE_SHARED) is set
+hf-cache        hf-cache         path-env      # interactive unless HF_CACHE_DIR (and, outside home, HF_CACHE_SHARED) is set
 hf-export       hf-export        hf-cache      # optional, sudo: the shared cache becomes every user's default
 herdr           herdr-install    claude-config codex
 ```
@@ -45,7 +45,7 @@ herdr           herdr-install    claude-config codex
 Dependencies decide the order; Steps with no dependency between them run in parallel.
 Interactive Steps (like `gh-auth`) take the terminal while background Steps keep
 going; anything that requires them waits. A Run without a terminal defers them,
-unless a setting already answers the question (`hf-cache` with `HF_HUB_CACHE_DIR` and `HF_HUB_CACHE_SHARED`).
+unless a setting already answers the question (`hf-cache` with `HF_CACHE_DIR` and `HF_CACHE_SHARED`).
 
 Optional Steps (like `hf-export`, the only one that uses sudo) are offered but
 never run unless you choose them: tick one in the checklist (marked `opt`), or
@@ -131,9 +131,9 @@ line; validation reports anything that still requires it.
 | `CLAUDE_SETUP_REF` | *(default branch)* | branch for a fresh clone, e.g. to test a change before merging it |
 | `GIT_USER_NAME` | `scott306lr` | git `user.name`, written only if `~/.gitconfig` has none |
 | `GIT_USER_EMAIL` | `scott306lr@gmail.com` | git `user.email`, likewise |
-| `HF_HUB_CACHE_DIR` | *(empty: asked on the terminal, suggesting `HF_HUB_CACHE_SUGGESTED`)* | exported as `HF_HUB_CACHE` (model and dataset downloads) for every shell, e.g. `/data/hf/hub`. `HF_HOME` is left at `~/.cache/huggingface`, so the token stays private. Change it later with `./init.sh run --force hf-cache hf-cache`; existing downloads are not moved |
-| `HF_HUB_CACHE_SUGGESTED` | `/shared/huggingface_cache/hub` | what that question offers when no `HF_HUB_CACHE` is in effect yet, if you can create it and `~/.cache/huggingface/hub` holds no downloads (else it offers that); Enter takes it |
-| `HF_HUB_CACHE_SHARED` | *(empty: asked)* | `yes` shares an `HF_HUB_CACHE_DIR` outside your home with every user of the server, `no` keeps it yours (see below) |
+| `HF_CACHE_DIR` | *(empty: asked on the terminal, suggesting `HF_CACHE_SUGGESTED`)* | the Hugging Face cache folder, e.g. `/data/hf`: `HF_HUB_CACHE=<folder>/hub` (models and datasets from the Hub) and `HF_DATASETS_CACHE=<folder>/datasets` (the datasets library's Arrow cache) are exported for every shell. `HF_HOME` is left at `~/.cache/huggingface`, so the token stays private. Change it later with `./init.sh run --force hf-cache hf-cache`: your downloads move to the new folder |
+| `HF_CACHE_SUGGESTED` | `/shared/huggingface_cache` | what that question offers when no cache folder is in effect yet, if you can create it (else `~/.cache/huggingface`); Enter takes it |
+| `HF_CACHE_SHARED` | *(empty: asked)* | `yes` shares an `HF_CACHE_DIR` outside your home with every user of the server, `no` keeps it yours (see below) |
 | `MANAGED_PYTHON_VERSIONS` | `3.10 3.12` | installed with `uv python install`; `UV_PYTHON_PREFERENCE=only-managed` is exported so `uv venv` / `uv sync` use them (they have `Python.h`) instead of a system Python that may lack its `-dev` package |
 
 Both protocols work because the setup repo records its GitHub marketplaces as
@@ -141,34 +141,36 @@ Both protocols work because the setup repo records its GitHub marketplaces as
 
 ## Sharing the Hugging Face cache between users
 
-Models are big, so everyone on a server can share one hub cache while each user
-keeps their own `HF_HOME` (token, login state). No group and no sudo: when the
-`hf-cache` Step's directory is outside your home, it asks whether to share it
-with every user of the server (or set `HF_HUB_CACHE_SHARED=yes`):
+Models and datasets are big, so everyone on a server can share one cache folder
+(`hub/` for Hub downloads, `datasets/` for the datasets library's Arrow cache)
+while each user keeps their own `HF_HOME` (token, login state). No group and no
+sudo: when the `hf-cache` Step's folder is outside your home, it asks whether to
+share it with every user of the server (or set `HF_CACHE_SHARED=yes`):
 
 ```bash
-HF_HUB_CACHE_DIR=/shared/huggingface_cache/hub HF_HUB_CACHE_SHARED=yes ./init.sh run hf-cache
+HF_CACHE_DIR=/shared/huggingface_cache HF_CACHE_SHARED=yes ./init.sh run hf-cache
 ```
 
 Sharing runs `admin/share-hf-cache.sh` as you: every user may read, add and
 replace entries, and a default ACL keeps new entries that way whoever creates
 them, whatever their umask (Hugging Face's `blobs/` stay read-only, as it makes
-them). Other users get it by pointing their own `HF_HUB_CACHE` there (the
-`hf-cache` Step offers it once it is exported system-wide). Adding a user takes
-nothing.
+them). Your earlier downloads (models and the datasets cache) move into the
+folder and become everyone's too; a cache that is already shared is never
+emptied. Other users get the folder by running the `hf-cache` Step, which offers
+it once it is exported system-wide. Adding a user takes nothing.
 
 Making it every user's default, including users who don't run this Pipeline,
 needs root: tick the optional `hf-export` Step in the checklist, or run
 `./init.sh run hf-export`. It prints the sudo command, and takes the terminal
 when sudo needs your password (with passwordless sudo it runs without one).
 Never run `init.sh` itself with sudo: it would set up root's account instead of
-yours, so outside a container or CI job it refuses. The same root run also opens any parent
-folder others can't enter and installs `acl` when `setfacl` is missing. Without
-the Pipeline, root runs the script directly, no clone needed:
+yours, so outside a container or CI job it refuses. The same root run also
+opens any parent folder others can't enter and installs `acl` when `setfacl` is
+missing. Without the Pipeline, root runs the script directly, no clone needed:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh \
-  | sudo bash -s -- /shared/huggingface_cache/hub
+  | sudo bash -s -- /shared/huggingface_cache
 ```
 
 Any user can then change any cached file, including model code that

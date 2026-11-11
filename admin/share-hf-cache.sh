@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# Share a Hugging Face hub cache with every user of this server: no group, no
-# re-login, nothing to do to add a user.
+# Share a Hugging Face cache folder with every user of this server: no group,
+# no re-login, nothing to do to add a user. The folder holds hub/ (Hub
+# downloads: models and datasets) and datasets/ (the datasets library's Arrow
+# cache), as HF_HOME would, but never the login token.
 #
-#   admin/share-hf-cache.sh DIR           share DIR (as its owner, or as root)
-#   admin/share-hf-cache.sh --check DIR   exit 0 if DIR is shared
-#   admin/share-hf-cache.sh --exported DIR  exit 0 if HF_HUB_CACHE=DIR is exported system-wide
+#   admin/share-hf-cache.sh DIR             share DIR (as its owner, or as root)
+#   admin/share-hf-cache.sh --check DIR     exit 0 if DIR is shared
+#   admin/share-hf-cache.sh --exported DIR  exit 0 if DIR's hub/ and datasets/ are exported system-wide
 #   curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- DIR
 #
-# As DIR's owner (the hf-cache Step runs it so): creates DIR if missing and lets
-# every user read, add and replace entries in it, through a default ACL that
-# keeps new entries that way whoever creates them, whatever their umask. Files
-# under blobs/ keep the read-only mode Hugging Face gives its immutable payloads.
-# As root it also covers entries other users own, installs acl (setfacl) with
-# apt if missing, lets everyone into a parent they cannot enter, and exports
-# HF_HUB_CACHE for every user (/etc/profile.d, /etc/environment), so users who
-# do not run my-init-pipeline use it too. A DIR it creates belongs to the user
-# who ran sudo. Safe to re-run. HF_HOME, which holds each user's token, is
-# never shared.
+# As DIR's owner (the hf-cache Step runs it so): creates DIR, DIR/hub and
+# DIR/datasets if missing, and lets every user read, add and replace entries,
+# through a default ACL that keeps new entries that way whoever creates them,
+# whatever their umask. Files under blobs/ keep the read-only mode Hugging Face
+# gives its immutable payloads. In a DIR someone else owns and already shared,
+# it covers just your own entries (say, downloads you moved in). As root it
+# also covers entries other users own, installs acl (setfacl) with apt if
+# missing, lets everyone into a parent they cannot enter, and exports
+# HF_HUB_CACHE=DIR/hub and HF_DATASETS_CACHE=DIR/datasets for every user
+# (/etc/profile.d/hf-cache.sh, /etc/environment), so users who do not run
+# my-init-pipeline use it too. A DIR it creates belongs to the user who ran
+# sudo. Safe to re-run. HF_HOME, which holds each user's token, is never shared.
 #
 # Any user can then change any cached file, including model code that
 # trust_remote_code runs: share only on a server whose users you trust.
@@ -35,7 +39,7 @@ main() {
   case "$dir" in /?*) ;; *) die "DIR must be an absolute path: $dir" ;; esac
   case "$query" in
     --check) is_shared "$dir"; return ;;
-    --exported) [ "$(cat "$PROFILE" 2>/dev/null)" = "$(printf 'export HF_HUB_CACHE=%q' "$dir")" ]; return ;;
+    --exported) [ "$(cat "$PROFILE" 2>/dev/null)" = "$(profile_lines "$dir")" ]; return ;;
   esac
   if [ "$(id -u)" = 0 ]; then root=1; fi
 
@@ -48,11 +52,17 @@ main() {
     mkdir -p "$dir"
     if [ "$root" = 1 ] && [ -n "${SUDO_USER:-}" ]; then chown "$SUDO_USER" "$dir"; fi
   fi
-  if [ "$root" = 0 ] && [ ! -O "$dir" ]; then
+  if [ "$root" = 0 ] && [ ! -O "$dir" ] && ! is_shared "$dir"; then
     die "$dir belongs to $(stat -c %U "$dir"); ask them, or root, to run: share-hf-cache.sh $dir"
   fi
+  for p in "$dir/hub" "$dir/datasets"; do
+    if [ ! -d "$p" ]; then
+      mkdir "$p"
+      if [ "$root" = 1 ] && [ -n "${SUDO_USER:-}" ]; then chown "$SUDO_USER" "$p"; fi
+    fi
+  done
 
-  # Root covers every entry; an owner, the entries it owns.
+  # Root covers every entry; anyone else, the entries they own.
   local -a mine=()
   if [ "$root" = 0 ]; then mine=(-user "$(id -u)"); fi
   find "$dir" "${mine[@]}" -type d -exec setfacl -m o::rwx -d -m u::rwx,g::rwx,o::rwx {} +
@@ -73,11 +83,12 @@ main() {
   done
 
   if [ "$root" = 1 ]; then
-    printf 'export HF_HUB_CACHE=%q\n' "$dir" >"$PROFILE"
+    profile_lines "$dir" >"$PROFILE"
     chmod 644 "$PROFILE"
-    sed -i '/^HF_HUB_CACHE=/d' /etc/environment
-    printf 'HF_HUB_CACHE=%s\n' "$dir" >>/etc/environment
-    echo "HF_HUB_CACHE=$dir for every user from their next login"
+    rm -f /etc/profile.d/hf-hub-cache.sh   # its name before datasets/ was shared too
+    sed -i -e '/^HF_HUB_CACHE=/d' -e '/^HF_DATASETS_CACHE=/d' /etc/environment
+    printf 'HF_HUB_CACHE=%s\nHF_DATASETS_CACHE=%s\n' "$dir/hub" "$dir/datasets" >>/etc/environment
+    echo "HF_HUB_CACHE=$dir/hub and HF_DATASETS_CACHE=$dir/datasets for every user from their next login"
   fi
   echo "$dir is shared with every user of this server"
   if [ "$root" = 0 ] && ! main --exported "$dir"; then
@@ -92,7 +103,10 @@ is_shared() {
   grep -qx 'other::rwx' <<<"$acl" && grep -qx 'default:other::rwx' <<<"$acl"
 }
 
-PROFILE=/etc/profile.d/hf-hub-cache.sh
+PROFILE=/etc/profile.d/hf-cache.sh
+
+# profile_lines DIR — what PROFILE holds once DIR is exported.
+profile_lines() { printf 'export HF_HUB_CACHE=%q\nexport HF_DATASETS_CACHE=%q' "$1/hub" "$1/datasets"; }
 
 die() { echo "error: $*" >&2; exit 1; }
 
