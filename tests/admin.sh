@@ -8,7 +8,9 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-docker run --rm -i -v "$root:/mip:ro" ubuntu:22.04 bash -euo pipefail <<'EOF'
+# --network host: since 2026-11-11 the CI runner's containers cannot resolve the
+# Ubuntu mirror on the default bridge (the host can), and the test installs acl.
+docker run --rm -i --network host -v "$root:/mip:ro" ubuntu:22.04 bash -euo pipefail <<'EOF'
 fail() { echo "FAIL: $*"; exit 1; }
 useradd -m alice; useradd -m bob; useradd -m carol
 mkdir -p /srv/locked && chmod 700 /srv/locked
