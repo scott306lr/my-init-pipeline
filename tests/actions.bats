@@ -431,3 +431,17 @@ share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >
   run on_tty 1
   [ "$status" -ne 0 ] && [[ "$output" == *"ask an admin to run: curl"*"sudo bash -s -- $T/srv/hub"* ]]
 }
+
+@test "codex: the Check needs codex's config directory; run creates it private without reinstalling" {
+  mkdir -p "$T/bin"
+  printf '#!/bin/sh\necho "codex-cli 9.9"\n' >"$T/bin/codex"; chmod +x "$T/bin/codex"
+  export PATH="$T/bin:$PATH"
+  run action codex-install check
+  [ "$status" -eq 1 ]                        # on PATH, but no ~/.codex yet (herdr needs it)
+  action codex-install run                   # codex is there: no installer download
+  [ "$(stat -c %a "$HOME/.codex")" = 700 ]
+  action codex-install check
+  mkdir -p "$T/codex-home"
+  run env CODEX_HOME="$T/codex-home" bash "$ROOT/lib/step.sh" "$ROOT/actions/codex-install.sh" check
+  [ "$status" -eq 0 ]                        # CODEX_HOME is honoured
+}

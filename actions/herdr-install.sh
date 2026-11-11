@@ -2,7 +2,8 @@
 # check:   herdr is on PATH, `herdr integration status` shows claude and codex
 #          current, and settings.json has no machine-specific herdr hook
 # notes:   https://herdr.dev/install.sh into ~/.local/bin. Must run after claude-config
-#          and codex: `herdr integration install` needs ~/.claude and ~/.codex to exist.
+#          and codex: `herdr integration install` needs ~/.claude and ~/.codex to exist
+#          (the codex Step creates ~/.codex, which codex itself makes only on first use).
 #          The claude integration writes into ~/.claude/settings.json, a symlink into
 #          the shared claude setup repo. herdr always adds a SessionStart hook with this
 #          machine's absolute path (bash '/home/<user>/.claude/hooks/...' session); that
