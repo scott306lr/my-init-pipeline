@@ -1,4 +1,4 @@
-# Step picker: the checklist `./init.sh run` shows on a terminal (ADR 0002).
+# The checklist `./init.sh run` shows on a terminal to choose Steps (ADR 0002).
 # Sourced by init.sh after lib/pipeline.sh.
 
 # v0.17.0, not v2: gum v2's choose binds toggle to " ", but Bubble Tea v2 names
@@ -17,7 +17,7 @@ gum_bin() {
       aarch64 | arm64) arch=arm64 ;;
       *) return 1 ;;
     esac
-    printf 'Fetching gum v%s for the Step picker...\n' "$GUM_VERSION" >&2
+    printf 'Fetching gum v%s for the checklist...\n' "$GUM_VERSION" >&2
     file="gum_${GUM_VERSION}_Linux_$arch.tar.gz"
     base="https://github.com/charmbracelet/gum/releases/download/v$GUM_VERSION"
     sha="$(release_sha256 "$base/checksums.txt" "$file")" && [ -n "$sha" ] || return 1
@@ -28,12 +28,12 @@ gum_bin() {
   printf '%s\n' "$dir/gum"
 }
 
-# pick_steps — show every Step with its summary and Check result; print the
+# checklist — show every Step with its summary and Check result; print the
 # ticked Step names. Steps with work to do start ticked, except optional ones
-# (marked "opt"), so Enter runs what a Run without the picker would; ticking an
+# (marked "opt"), so Enter runs what a Run without the checklist would; ticking an
 # optional Step runs it, ticking a done Step upgrades it. Exit status: 130 when cancelled, other non-zero
-# when no picker could be shown.
-pick_steps() {
+# when no checklist could be shown.
+checklist() {
   local gum s st mark label
   local -a opts=() ticked=()
   gum="$(gum_bin)" || return 1

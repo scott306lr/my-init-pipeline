@@ -332,7 +332,7 @@ fake_uv_bin() {
   printf '#!/bin/sh\necho "uv $* nomod=$UV_NO_MODIFY_PATH" >>"%s/uv.calls"\n' "$T" >"$T/bin/uv"
   chmod +x "$T/bin/uv"
   printf '#!/bin/sh\necho "installer nomod=$UV_NO_MODIFY_PATH" >>"%s/uv.calls"\nmkdir -p "$HOME/.config/uv" && echo {} >"$HOME/.config/uv/uv-receipt.json"\n' "$T" >"$T/uv-install.sh"
-  export PATH="$T/bin:$PATH" UV_INSTALLER_URL="file://$T/uv-install.sh"
+  export PATH="$T/bin:$PATH" MIP_UV_INSTALLER_URL="file://$T/uv-install.sh"
 }
 
 @test "uv: upgrade self-updates a standalone install, without touching shell profiles" {

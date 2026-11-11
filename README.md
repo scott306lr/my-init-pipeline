@@ -108,10 +108,12 @@ Rules for Actions:
   All three record into `~/.config/my-init-pipeline/env.sh`. `~/.bashrc` sources that file through one
   marked block.
 - Each function runs in a fresh `bash -eo pipefail`, with `lib/common.sh` and `config.sh`
-  loaded. Helpers: `have`, `info`, `die`, `fetch`, `run_installer`,
+  loaded. Helpers: `have`, `info`, `warn`, `die`, `fetch`, `run_installer`,
   `github_latest_tag`, `machine_arch`, `release_sha256`, `install_release_binary`
   (download a GitHub release tarball, verify its sha256 when published, install
-  one binary), `add_path`, `add_env`, `remove_env`, `add_shell_init`.
+  one binary into `~/.local/bin` or a given folder), `add_path`, `add_env`,
+  `remove_env`, `add_shell_init`, `in_home` (a path is in your home),
+  `share_hf_cache` (`admin/share-hf-cache.sh`), `root_outside_container`.
 
 To swap how something is installed, point its Step at a different Action. The
 Step name and every dependency on it stay unchanged. To remove a Step, delete its

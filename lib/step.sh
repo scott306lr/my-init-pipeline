@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: step.sh ACTION_FILE FUNCTION [ARG...]
 #
-# Runs one function (check | run | upgrade | note) of an Action in a fresh
+# Runs one function (check | run | upgrade | note | interactive) of an Action in a fresh
 # shell, so Actions never see the runner's internals and every Step picks up
 # PATH entries recorded by the Steps before it.
 #

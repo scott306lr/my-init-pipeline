@@ -2,21 +2,19 @@
 # check:   not applicable for an HF_HUB_CACHE inside your home; else HF_HUB_CACHE is shared with every user and /etc/profile.d exports it
 # interactive: yes
 # optional: yes
-# notes:   Optional, so it runs only when ticked in the picker, named
+# notes:   Optional, so it runs only when ticked in the checklist, named
 #          (`./init.sh run hf-export`) or forced, never in a default or -y Run:
 #          it is the one Step that needs root. It prints the sudo command, then
 #          runs admin/share-hf-cache.sh as root for HF_HUB_CACHE: sharing it
 #          (entries other users own included), the export in /etc/profile.d and
 #          /etc/environment, and any parent folder others cannot enter. Its Check
 #          does not wait for hf-cache: before hf-cache has recorded a directory
-#          there is work to do, so the picker offers it on a fresh server too.
+#          there is work to do, so the checklist offers it on a fresh server too.
 #          It takes the terminal when sudo needs a password; with passwordless
 #          (or freshly cached) sudo it runs without one, using `sudo -n`, so a
 #          credential that expires between the check and the run fails at once
 #          with "run it on a terminal" instead of hanging. Without sudo it
 #          fails with the command to give an admin.
-
-SHARE="$MIP_ROOT/admin/share-hf-cache.sh"
 
 # A terminal only when sudo would ask for a password.
 interactive() { ! sudo -n true 2>/dev/null; }
@@ -24,14 +22,13 @@ interactive() { ! sudo -n true 2>/dev/null; }
 check() {
   local dir="${HF_HUB_CACHE:-}"   # env.sh is loaded: the hf-cache Step's value
   [ -n "$dir" ] || return 1       # hf-cache runs first and records it
-  # A cache in your home is yours alone.
-  if [[ "$(realpath -m "$dir")/" == "$(realpath -m "$HOME")/"* ]]; then return 2; fi
-  bash "$SHARE" --check "$dir" && bash "$SHARE" --exported "$dir"
+  if in_home "$dir"; then return 2; fi   # a cache in your home is yours alone
+  share_hf_cache --check "$dir" && share_hf_cache --exported "$dir"
 }
 
 run() {
   [ -n "${HF_HUB_CACHE:-}" ] || die "no HF_HUB_CACHE yet; run the hf-cache Step first"
-  local -a cmd=(sudo bash "$SHARE" "$HF_HUB_CACHE")
+  local -a cmd=(sudo bash "$MIP_ROOT/admin/share-hf-cache.sh" "$HF_HUB_CACHE")
   if [ ! -t 0 ]; then cmd=(sudo -n "${cmd[@]:1}"); fi   # no terminal: sudo must not prompt
   warn "hf-export needs sudo: ${cmd[*]}"
   "${cmd[@]}" && return

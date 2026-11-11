@@ -9,7 +9,7 @@
 #          so later upgrades self-update. UV_NO_MODIFY_PATH=1 keeps either from
 #          editing shell profiles.
 
-UV_INSTALLER_URL="${UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}"
+UV_INSTALLER_URL="${MIP_UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}"   # override: tests
 UV_RECEIPT="${XDG_CONFIG_HOME:-$HOME/.config}/uv/uv-receipt.json"
 
 check() { have uv; }

@@ -24,6 +24,13 @@ root_outside_container() {
   if [ -f /proc/1/cgroup ] && grep -Eq 'azpl_job|actions_job|docker|garden|kubepods' /proc/1/cgroup; then return 1; fi
 }
 
+# in_home DIR — true if DIR is your home directory or lies below it.
+in_home() { [[ "$(realpath -m "$1")/" == "$(realpath -m "$HOME")/"* ]]; }
+
+# share_hf_cache [--check | --exported] DIR — admin/share-hf-cache.sh: share DIR
+# with every user (as its owner), or ask whether it is shared / exported.
+share_hf_cache() { bash "$MIP_ROOT/admin/share-hf-cache.sh" "$@"; }
+
 # have CMD — true if CMD resolves on PATH.
 have() { command -v "$1" >/dev/null 2>&1; }
 

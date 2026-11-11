@@ -8,7 +8,7 @@ setup_pipeline() {
   export HOME="$T/home"
   export MIP_CONF="$T/pipeline.conf" MIP_ACTIONS_DIR="$T/actions" MIP_USER_CONFIG="$T/config.sh"
   unset XDG_CONFIG_HOME XDG_STATE_HOME
-  export MIP_GUM="$T/no-gum"   # never download the Step picker; fake_gum replaces it
+  export MIP_GUM="$T/no-gum"   # never download the checklist's gum; fake_gum replaces it
   mkdir -p "$HOME" "$MIP_ACTIONS_DIR" "$T/state"
   : >"$MIP_USER_CONFIG"
   : >"$T/events"

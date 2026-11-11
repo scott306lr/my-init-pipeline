@@ -12,15 +12,16 @@
 # run options:
 #   --force STEP        run STEP even if its Check passes (repeatable)
 #   --upgrade           for every Step whose Check passes, call its upgrade() (Tools'
-#                       updaters, a pull of the claude setup repo); no picker
+#                       updaters, a pull of the claude setup repo); no checklist
 #   -j, --jobs N        parallel Steps (default: number of CPUs; 1 = serial)
 #   --non-interactive   skip Interactive Steps (and what requires them)
 #   --dry-run           print the plan with current Check results; change nothing
-#   -y, --yes           no Step picker: run every Step that is not done (but
+#   -y, --yes           no checklist: run every Step that is not done (but
 #                       optional ones, which run only when named or ticked)
 #
 # Environment overrides (mainly for tests): MIP_CONF, MIP_ACTIONS_DIR, MIP_USER_CONFIG,
-# MIP_HEARTBEAT (seconds of silence before a "still running" line; default 30).
+# MIP_HEARTBEAT (seconds of silence before a "still running" line; default 30),
+# MIP_GUM (the checklist's gum), MIP_UV_INSTALLER_URL (the uv Step's installer).
 set -uo pipefail
 
 MIP_CALLER_PATH="$PATH"   # the invoking shell's PATH, before anything here changes it
@@ -33,8 +34,8 @@ export MIP_ROOT MIP_CONF MIP_ACTIONS_DIR
 . "$MIP_ROOT/lib/common.sh"
 # shellcheck source=lib/pipeline.sh
 . "$MIP_ROOT/lib/pipeline.sh"
-# shellcheck source=lib/picker.sh
-. "$MIP_ROOT/lib/picker.sh"
+# shellcheck source=lib/checklist.sh
+. "$MIP_ROOT/lib/checklist.sh"
 
 usage() { sed -n '2,/^set /{/^set /d;s/^# \{0,1\}//;p}' "$0"; }
 
@@ -71,7 +72,7 @@ cmd_run() {
   local -a targets=()
   local dry=0 yes=0 rc=0 picked mode=install
   local -A FORCE=() UPGRADE=()
-  declare -gA STEP_MODE=() OFFERED=()
+  declare -gA STEP_MODE=() UNCHOSEN=()
   MIP_JOBS="$(nproc 2>/dev/null || echo 4)"
   MIP_INTERACTIVE=1
   while [ $# -gt 0 ]; do
@@ -94,13 +95,13 @@ cmd_run() {
   for s in "${targets[@]}" "${!FORCE[@]}"; do need_step "$s"; done
 
   # Like create-t3-app: ask on a terminal, unless told what to do (Steps named,
-  # -y, an upgrade or a dry run, which must not download the picker).
+  # -y, an upgrade or a dry run, which must not download the checklist's gum).
   if [ ${#targets[@]} -eq 0 ] && [ ${#FORCE[@]} -eq 0 ] && [ "$yes" = 0 ] && [ "$dry" = 0 ] &&
     [ "$mode" = install ] && [ "$MIP_INTERACTIVE" = 1 ] && [ -t 0 ] && [ -t 1 ]; then
-    picked="$(pick_steps)" || rc=$?
+    picked="$(checklist)" || rc=$?
     if [ "$rc" = 130 ]; then echo "Cancelled; nothing was run."; return 130; fi
     if [ "$rc" != 0 ]; then
-      warn "could not show the Step picker (gum v$GUM_VERSION unavailable); running every Step"
+      warn "could not show the checklist (gum v$GUM_VERSION unavailable); running every Step"
     elif [ -z "$picked" ]; then
       echo "No Steps selected; nothing to do."; return 0
     else
@@ -121,7 +122,7 @@ cmd_run() {
     if [ -n "${FORCE[$s]:-}" ]; then STEP_MODE[$s]=force
     elif [ -n "${UPGRADE[$s]:-}" ]; then STEP_MODE[$s]=upgrade
     else STEP_MODE[$s]="$mode"; fi
-    if is_optional "$s" && [ -z "${chosen[$s]:-}" ]; then OFFERED[$s]=1; fi
+    if is_optional "$s" && [ -z "${chosen[$s]:-}" ]; then UNCHOSEN[$s]=1; fi
   done
 
   if [ "$dry" = 1 ]; then

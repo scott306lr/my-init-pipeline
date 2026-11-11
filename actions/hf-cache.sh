@@ -22,7 +22,7 @@
 HF_HOME_DEFAULT="$HOME/.cache/huggingface"
 
 interactive() {
-  [ -z "$HF_HUB_CACHE_DIR" ] || { [ -z "$HF_HUB_CACHE_SHARED" ] && share_question "$HF_HUB_CACHE_DIR"; }
+  [ -z "$HF_HUB_CACHE_DIR" ] || { [ -z "$HF_HUB_CACHE_SHARED" ] && should_ask_to_share "$HF_HUB_CACHE_DIR"; }
 }
 
 check() {
@@ -31,7 +31,7 @@ check() {
   [ -n "$dir" ] && [ -d "$dir" ] && [ -w "$dir" ] &&
     { [ -z "$HF_HUB_CACHE_DIR" ] || [ "$dir" = "$HF_HUB_CACHE_DIR" ]; } &&
     [ -z "$(recorded HF_HOME)" ] && [ ! -L "$HF_HOME_DEFAULT" ] &&
-    { [ "$HF_HUB_CACHE_SHARED" != yes ] || shared "$dir"; }
+    { [ "$HF_HUB_CACHE_SHARED" != yes ] || share_hf_cache --check "$dir"; }
 }
 
 run() {
@@ -53,7 +53,7 @@ run() {
   fi
   case "$dir" in /*) ;; *) die "HF_HUB_CACHE must be an absolute path: $dir" ;; esac
   [ -n "$legacy" ] && restore_home "$legacy"
-  if share_question "$dir" && [ -z "$share" ]; then
+  if should_ask_to_share "$dir" && [ -z "$share" ]; then
     # Enter shares; no answer at all (EOF) never does.
     if read -r -p "Share $dir with every user of this server? [Y/n]: " answer; then
       case "$answer" in [nN]*) share=no ;; *) share=yes ;; esac
@@ -61,8 +61,8 @@ run() {
       share=no
     fi
   fi
-  if [ "$share" = yes ] && ! shared "$dir"; then
-    bash "$MIP_ROOT/admin/share-hf-cache.sh" "$dir"
+  if [ "$share" = yes ] && ! share_hf_cache --check "$dir"; then
+    share_hf_cache "$dir"
   fi
   if ! mkdir -p "$dir" || [ ! -w "$dir" ]; then
     die "cannot create or write to $dir; if someone else made it, ask them or root to run: admin/share-hf-cache.sh $dir"
@@ -81,19 +81,13 @@ note() {
   # The runner inherits the shell that started it, so a stale HF_HOME shows here.
   if [ -n "${HF_HOME:-}" ]; then echo "HF_HOME is still set in this shell: run 'unset HF_HOME' or open a new terminal"; fi
   # Exporting it for users who never run this Pipeline is the optional hf-export Step.
-  if [ -n "$dir" ] && shared "$dir" && ! bash "$MIP_ROOT/admin/share-hf-cache.sh" --exported "$dir"; then
+  if [ -n "$dir" ] && share_hf_cache --check "$dir" && ! share_hf_cache --exported "$dir"; then
     echo "$dir is shared; to make it every user's default (needs sudo): ./init.sh run hf-export"
   fi
 }
 
-# shared DIR — every user may add and replace entries in DIR.
-shared() { bash "$MIP_ROOT/admin/share-hf-cache.sh" --check "$1"; }
-
-# share_question DIR — whether to ask about sharing DIR: it lies outside your
-# home and is not shared already.
-share_question() {
-  [[ "$(realpath -m "$1")/" != "$(realpath -m "$HOME")/"* ]] && ! shared "$1"
-}
+# should_ask_to_share DIR — DIR lies outside your home and is not shared yet.
+should_ask_to_share() { ! in_home "$1" && ! share_hf_cache --check "$1"; }
 
 # suggestion — what to offer when no HF_HUB_CACHE is in effect: downloads
 # already in HF's default location stay there; else HF_HUB_CACHE_SUGGESTED, if

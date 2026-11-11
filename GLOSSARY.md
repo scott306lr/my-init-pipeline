@@ -13,9 +13,11 @@ _Avoid_: service, app, stage.
 
 **Run** — One execution of the Pipeline, or a selected part of it, on one server.
 
-**Interactive Step** — A Step that needs a human at the keyboard, for example to log in. A non-interactive Run skips it.
+**Interactive Step** — A Step that needs a human at the keyboard, for example to log in. A non-interactive Run defers it, unless a setting already answers what it would ask.
 
-**Optional Step** — A Step that is offered but runs only when chosen: named on the command line, ticked in the Step picker, or forced. Otherwise a Step with work to do is skipped as optional, and what requires it still runs.
+**Checklist** — What `./init.sh run` shows on a terminal when no Step is named: every Step with its Check result, ticked or not, to choose what this Run does. Steps with work to do start ticked; Optional Steps start unticked.
+
+**Optional Step** — A Step that is offered but runs only when chosen: named on the command line, ticked in the Checklist, or forced. Otherwise a Step with work to do is skipped as optional, and what requires it still runs.
 
 **Note** — A message a Step leaves for the human, shown at the end of a Run. It covers follow-up work the Pipeline does not do itself, such as logging in to a Tool.
 

@@ -22,7 +22,7 @@ directory. We rejected:
 
 - The first Run on a terminal downloads gum (about 5 MB). If it can't be
   fetched, the Run warns and runs every Step, so no Run is blocked on it.
-- No picker for `--dry-run` (it must not download anything) or `--upgrade`.
+- No checklist for `--dry-run` (it must not download anything) or `--upgrade`.
 - gum splits `--selected` on commas, so Step labels have their commas replaced.
 - The pin is gum v0.17.0, not v2: v2's `choose` binds toggle to `" "`, but
   Bubble Tea v2 reports that key as `"space"` (ultraviolet `Key.String`), so space
