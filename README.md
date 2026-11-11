@@ -44,7 +44,7 @@ cd ~/my-init-pipeline
 | Redo a Step that is already done | `./init.sh run --force codex` |
 | See every Step and whether it is done | `./init.sh list` |
 | Read what one Step does | `./init.sh describe hf-cache` |
-| Preview without changing anything | `./init.sh run --dry-run` |
+| Preview what a Run would do to each Step, changing nothing | `./init.sh run --dry-run` |
 | All commands and options | `./init.sh help` |
 
 In the checklist, ticking a Step that is already done upgrades it, and Steps
@@ -198,14 +198,16 @@ Conventions every Action follows:
   `~/.bashrc` sources.
 - Each function runs in a fresh `bash -eo pipefail` with `lib/common.sh`
   (helpers, documented there) and `config.sh` loaded. Logic two Actions share
-  goes in `lib/`.
+  goes in `lib/`, in a file they source (as `lib/hf-cache.sh` is).
+- `upgrade()`, `note()` and `interactive()` are optional: define one only when
+  the Action has something to do there.
 - Header keys: `interactive: yes` if it may need a human, `optional: yes` if it
   should run only when chosen, `notes:` for anything `describe` should show.
 
 ## Tests
 
 ```bash
-tests/run.sh                            # unit tests (bats)
+tests/run.sh                            # unit tests (bats 1.14.0, fetched into tests/.bats)
 tests/admin.sh                          # cache sharing as root, in a container
 tests/e2e.sh                            # real installs in a throwaway HOME
 GH_TOKEN=$(gh auth token) tests/e2e.sh  # e2e including claude-config and herdr
