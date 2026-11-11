@@ -222,6 +222,36 @@ setup() { setup_pipeline; }
   [[ "$output" != *"Notes:"* ]]
 }
 
+@test "notes: note() gets the result word, after an upgrade too" {
+  step a
+  printf '%s\n' 'check() { [ -f "$T/state/a" ]; }' 'run() { touch "$T/state/a"; }' \
+    'upgrade() { :; }' 'note() { echo "note after $1"; }' >"$MIP_ACTIONS_DIR/a.sh"
+  run mip run --non-interactive
+  [[ "$output" == *"[a] note after ran"* ]]
+  run mip run --upgrade --non-interactive
+  [[ "$output" == *"[a] note after upgraded"* ]]
+}
+
+@test "update: fast-forwards the checkout, then runs the given command with it" {
+  git -C "$T" init -q -b main origin
+  cp -r "$ROOT/init.sh" "$ROOT/lib" "$T/origin/"
+  git -C "$T/origin" add -A && git -C "$T/origin" -c user.name=t -c user.email=t@t commit -qm one
+  git clone -q "$T/origin" "$T/mip"
+  echo x >"$T/origin/new" && git -C "$T/origin" add new && git -C "$T/origin" -c user.name=t -c user.email=t@t commit -qm two
+  step a; fake_action a
+  run "$T/mip/init.sh" update list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"my-init-pipeline: "*" two"* ]]
+  [[ "$output" == *"fake a"* ]]                       # `list` ran after the pull
+  [ -f "$T/mip/new" ]
+  run "$T/mip/init.sh" update                          # up to date, no command
+  [ "$status" -eq 0 ]
+  echo y >"$T/mip/new"; git -C "$T/mip" -c user.name=t -c user.email=t@t commit -qam local
+  echo z >"$T/origin/new"; git -C "$T/origin" -c user.name=t -c user.email=t@t commit -qam three
+  run "$T/mip/init.sh" update list
+  [ "$status" -ne 0 ] && [[ "$output" == *"could not fast-forward"* ]] && [[ "$output" != *"fake a"* ]]
+}
+
 @test "validation: unknown requirement, cycle, missing action, duplicate" {
   step a nope; fake_action a
   run mip run --non-interactive
@@ -309,6 +339,18 @@ picker_pipeline() {
   run mip_tty run
   [ "$status" -eq 0 ]
   grep -q 'start b' "$T/events"
+}
+
+@test "picker: a ticked done Step with upgrade() is upgraded, not re-run" {
+  picker_pipeline
+  fake_action b --upgrade
+  touch "$T/state/b"
+  fake_gum 0 b
+  run mip_tty run
+  [ "$status" -eq 0 ]
+  grep -q 'upgrade b' "$T/events"
+  ! grep -q 'start b' "$T/events"
+  [[ "$output" == *"↑ b"* ]]
 }
 
 @test "picker: cancelling runs nothing and exits 130; ticking nothing runs nothing" {

@@ -10,10 +10,14 @@
 #          install.sh exits 0 even when a marketplace fails; those warnings come
 #          back as a Note instead of failing the Step.
 #          Settings live in config.sh.
-#          Upgrade re-runs install.sh -y, which also repairs plugin caches; pulling
-#          new config is sync-claude's job, not this Step's.
+#          Upgrade fast-forwards the clone to its upstream (git pull --ff-only),
+#          then re-runs install.sh -y, which also repairs plugin caches. A clone
+#          with uncommitted changes or local commits is not pulled: publishing
+#          and merging stay with /sync-claude (the setup repo's sync.sh), and a
+#          Note says so.
 
 WARNINGS_FILE="$MIP_STATE_DIR/claude-config.warnings"
+PULL_FILE="$MIP_STATE_DIR/claude-config.pull"
 
 check() {
   [ -d "$CLAUDE_SETUP_DIR/.git" ] || return 1
@@ -30,7 +34,25 @@ run() {
   install_config
 }
 
-upgrade() { install_config; }
+upgrade() {
+  pull_config
+  install_config
+}
+
+# pull_config — fast-forward the clone, unless it holds work of yours; records
+# why it did not in PULL_FILE for the Note.
+pull_config() {
+  local dir="$CLAUDE_SETUP_DIR"
+  mkdir -p "$MIP_STATE_DIR"
+  : >"$PULL_FILE"
+  if [ -n "$(git -C "$dir" status --porcelain)" ]; then
+    echo "$dir has uncommitted changes, so it was not pulled; publish them with /sync-claude" >"$PULL_FILE"
+  elif ! git -C "$dir" pull --ff-only --quiet; then
+    echo "$dir could not be fast-forwarded (local commits?), so it was not pulled; run /sync-claude" >"$PULL_FILE"
+  else
+    info "$dir at $(git -C "$dir" log -1 --format='%h %s')"
+  fi
+}
 
 clone_url() {
   case "$CLAUDE_SETUP_PROTOCOL" in
@@ -55,6 +77,7 @@ install_config() {
 }
 
 note() {
+  if [ "$1" = upgraded ] && [ -s "$PULL_FILE" ]; then cat "$PULL_FILE"; fi
   [ -s "$WARNINGS_FILE" ] || return 0
   echo "install.sh reported problems (see this Step's log):"
   sed 's/^/  /' "$WARNINGS_FILE"

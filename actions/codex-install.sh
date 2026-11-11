@@ -14,4 +14,4 @@ run() {
 
 upgrade() { run; }
 
-note() { echo "Log in to Codex: run 'codex login'."; }
+note() { [ "$1" = upgraded ] || echo "Log in to Codex: run 'codex login'."; }

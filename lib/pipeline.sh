@@ -3,7 +3,7 @@
 #
 # Step results:
 #   ran       Check failed, Action ran, Check passed afterwards
-#   upgraded  --upgrade: Check passed and the Action's upgrade() ran
+#   upgraded  Upgrade mode: Check passed and the Action's upgrade() ran
 #   done      Check already passed — skipped
 #   na        Check reported "not applicable here" (exit 2) — skipped
 #   failed    Action or post-run Check failed
@@ -131,7 +131,16 @@ is_interactive() {
 
 # ── execution ─────────────────────────────────────────────────────────────────
 
-step_call() { bash "$MIP_ROOT/lib/step.sh" "$(action_file "$1")" "$2"; }
+# step_call STEP FUNCTION [ARG...] — run one function of the Step's Action.
+step_call() { bash "$MIP_ROOT/lib/step.sh" "$(action_file "$1")" "${@:2}"; }
+
+# action_defines STEP FUNCTION — true if the Step's Action defines FUNCTION.
+action_defines() {
+  (
+    # shellcheck disable=SC1090
+    . "${MIP_USER_CONFIG:-$MIP_ROOT/config.sh}" && . "$(action_file "$1")" && declare -F "$2"
+  ) >/dev/null 2>&1
+}
 
 # check_status STEP — prints done | na | todo (Checks must have no side effects).
 check_status() {
@@ -140,17 +149,19 @@ check_status() {
   case "$rc" in 0) echo "done" ;; 2) echo na ;; *) echo todo ;; esac
 }
 
-# step_execute STEP FORCE — the body of one Step. Prints its result word last.
+# step_execute STEP MODE — the body of one Step. Prints its result word last.
+# MODE: install (run unless the Check passes), force (run regardless), or
+# upgrade (run unless the Check passes; if it does, call upgrade()).
 # Output (other than the result) is meant for the Step's log.
 step_execute() {
-  local step="$1" force="$2" rc=0
-  echo "== $step (action: ${ACTION[$step]}) $(date '+%F %T')"
-  if [ "$force" != 1 ]; then
+  local step="$1" mode="$2" rc=0
+  echo "== $step (action: ${ACTION[$step]}, $mode) $(date '+%F %T')"
+  if [ "$mode" != force ]; then
     echo "-- check"
     step_call "$step" check || rc=$?
     if [ "$rc" = 2 ]; then echo "RESULT na"; return; fi
     if [ "$rc" = 0 ]; then
-      if [ "$MIP_MODE" = upgrade ]; then
+      if [ "$mode" = upgrade ]; then
         echo "-- upgrade"
         echo upgrading >"$RUN_DIR/$step.started"
         rc=0; step_call "$step" upgrade || rc=$?
@@ -177,27 +188,29 @@ step_execute() {
   echo "RESULT ran"
 }
 
-# Background job wrapper: log everything, leave the result in a file.
+# Background job wrapper: log everything, leave the result in a file. A Step
+# that ran or upgraded may leave a Note; note() gets that result word.
 step_job() {
-  local step="$1" force="$2" out
-  out="$(step_execute "$step" "$force" 2>&1 | tee -a "$RUN_DIR/$step.log" | sed -n 's/^RESULT //p' | tail -n 1)"
-  [ "$out" = ran ] && { step_call "$step" note >"$RUN_DIR/$step.note" 2>/dev/null || true; }
+  local step="$1" mode="$2" out
+  out="$(step_execute "$step" "$mode" 2>&1 | tee -a "$RUN_DIR/$step.log" | sed -n 's/^RESULT //p' | tail -n 1)"
+  case "$out" in ran | upgraded) step_call "$step" note "$out" >"$RUN_DIR/$step.note" 2>/dev/null || true ;; esac
   printf '%s\n' "${out:-failed}" >"$RUN_DIR/$step.result"
 }
 
 # Interactive Steps own the terminal: no redirection, so prompts and tty
-# detection work. Only the runner's own bookkeeping goes to the log.
+# detection work. Only the runner's own bookkeeping goes to the log. They have
+# nothing to upgrade, so upgrade mode is install mode here.
 step_foreground() {
-  local step="$1" force="$2" rc=0 result
+  local step="$1" mode="$2" rc=0 result
   echo "== $step (interactive) $(date '+%F %T')" >>"$RUN_DIR/$step.log"
-  if [ "$force" != 1 ] && [ "$(check_status "$step")" = "done" ]; then
+  if [ "$mode" != force ] && [ "$(check_status "$step")" = "done" ]; then
     result="done"
   else
     printf '▶ %s (interactive)\n' "$step"
     step_call "$step" run </dev/tty || rc=$?
     if [ "$rc" = 0 ] && [ "$(check_status "$step")" = "done" ]; then
       result=ran
-      step_call "$step" note >"$RUN_DIR/$step.note" 2>/dev/null || true
+      step_call "$step" note ran >"$RUN_DIR/$step.note" 2>/dev/null || true
     else
       result=failed
     fi
@@ -222,7 +235,8 @@ is_satisfied() { case "$1" in ran | upgraded | done | na) return 0 ;; esac; retu
 is_dead() { case "$1" in failed | deferred | blocked | aborted) return 0 ;; esac; return 1; }
 
 # pipeline_run STEP... — schedule the given (already selected, TOPO-ordered)
-# Steps. Uses MIP_JOBS, MIP_INTERACTIVE (0/1), MIP_MODE, and FORCE[step].
+# Steps. Uses MIP_JOBS, MIP_INTERACTIVE (0/1) and STEP_MODE[step] (see
+# step_execute; install when unset).
 # Returns 1 if any Step failed.
 pipeline_run() {
   local -a plan=("$@")
@@ -287,10 +301,10 @@ pipeline_run() {
 
         if is_interactive "$s"; then
           if [ "$MIP_INTERACTIVE" != 1 ]; then
-            if [ "${FORCE[$s]:-0}" != 1 ] && [ "$(check_status "$s")" = "done" ]; then r="done"; else r=deferred; fi
+            if [ "${STEP_MODE[$s]:-install}" != force ] && [ "$(check_status "$s")" = "done" ]; then r="done"; else r=deferred; fi
           else
             start[$s]=$SECONDS
-            step_foreground "$s" "${FORCE[$s]:-0}"
+            step_foreground "$s" "${STEP_MODE[$s]:-install}"
             r="$(cat "$RUN_DIR/$s.result")"
           fi
           state[$s]="$r"; report "$s" "$r"
@@ -301,7 +315,7 @@ pipeline_run() {
 
         [ "$running" -lt "$MIP_JOBS" ] || continue
         start[$s]=$SECONDS
-        step_job "$s" "${FORCE[$s]:-0}" </dev/null >/dev/null 2>&1 &
+        step_job "$s" "${STEP_MODE[$s]:-install}" </dev/null >/dev/null 2>&1 &
         pid[$s]=$!
         state[$s]=running; running=$((running + 1))
       done

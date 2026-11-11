@@ -50,11 +50,12 @@ unless a setting already answers the question (`hf-cache` with `HF_HUB_CACHE_DIR
 
 | Command | |
 |---|---|
-| `./init.sh run` | On a terminal, pick Steps from a checklist, then run them (plus what they require). Steps with work to do start ticked; a ticked Step that is already done is re-run |
+| `./init.sh run` | On a terminal, pick Steps from a checklist, then run them (plus what they require). Steps with work to do start ticked; ticking a Step that is already done upgrades it (re-runs it if it has no `upgrade()`) |
 | `./init.sh run -y` | Run the whole Pipeline without the checklist (also what happens without a terminal) |
 | `./init.sh run herdr` | Run `herdr` plus whatever it requires that isn't satisfied yet |
 | `./init.sh run --force codex` | Re-run a Step even though its Check passes |
-| `./init.sh run --upgrade` | Update every installed Tool with its own updater |
+| `./init.sh run --upgrade` | Upgrade everything already installed: each Tool with its own updater, and the claude setup repo pulled (fast-forward only) and re-installed |
+| `./init.sh update` | Pull the latest my-init-pipeline (fast-forward only). `./init.sh update run --upgrade` updates the pipeline, then everything it installed |
 | `./init.sh run --dry-run` | Show the plan and current Check results; change nothing |
 | `./init.sh run -j 1` | One Step at a time (easier to debug) |
 | `./init.sh run --non-interactive` | Skip Interactive Steps and what requires them |
@@ -81,8 +82,9 @@ such as logging in to `claude` and `codex`. Full logs go to
 
    check()   { have mytool; }          # 0 = satisfied, 2 = not applicable here, else = to do
    run()     { run_installer https://example.com/install.sh; }
-   upgrade() { mytool self-update; }   # optional, used by --upgrade
-   note()    { echo "Remember to ..."; }  # optional, shown after a Run where it ran
+   upgrade() { mytool self-update; }   # optional: --upgrade, or ticking a done Step
+   note()    { [ "$1" = upgraded ] || echo "Remember to ..."; }  # optional, shown after a Run where
+                                       # it ran or upgraded; $1 says which
    interactive() { [ -z "$MYTOOL_TOKEN" ]; }  # optional, with `interactive: yes`: 0 while a human is still needed
    ```
 

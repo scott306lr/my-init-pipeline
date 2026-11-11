@@ -3,13 +3,16 @@
 #
 #   ./init.sh run [STEP...] [options]   run the Pipeline (or STEPs + what they require);
 #                                       on a terminal with no STEP, pick Steps first
+#   ./init.sh update [COMMAND...]       pull the latest my-init-pipeline (fast-forward
+#                                       only), then run COMMAND with it, e.g. `update run --upgrade`
 #   ./init.sh list                      Step → Action → requires → check → summary
 #   ./init.sh describe STEP             full description of one Step
 #   ./init.sh help
 #
 # run options:
 #   --force STEP        run STEP even if its Check passes (repeatable)
-#   --upgrade           for Steps whose Check passes, call the Tool's updater
+#   --upgrade           for every Step whose Check passes, call its upgrade() (Tools'
+#                       updaters, a pull of the claude setup repo); no picker
 #   -j, --jobs N        parallel Steps (default: number of CPUs; 1 = serial)
 #   --non-interactive   skip Interactive Steps (and what requires them)
 #   --dry-run           print the plan with current Check results; change nothing
@@ -65,15 +68,15 @@ cmd_describe() {
 
 cmd_run() {
   local -a targets=()
-  local dry=0 yes=0 rc=0 picked
-  declare -gA FORCE=()
+  local dry=0 yes=0 rc=0 picked mode=install
+  local -A FORCE=() UPGRADE=()
+  declare -gA STEP_MODE=()
   MIP_JOBS="$(nproc 2>/dev/null || echo 4)"
-  MIP_MODE=install
   MIP_INTERACTIVE=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --force) [ $# -ge 2 ] || die "--force needs a step"; FORCE[$2]=1; shift ;;
-      --upgrade) MIP_MODE=upgrade ;;
+      --upgrade) mode=upgrade ;;
       -j | --jobs) [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "$1 needs a positive number"; MIP_JOBS="$2"; shift ;;
       --non-interactive) MIP_INTERACTIVE=0 ;;
       --dry-run) dry=1 ;;
@@ -83,7 +86,6 @@ cmd_run() {
     esac
     shift
   done
-  export MIP_MODE
 
   load_pipeline
   local s
@@ -92,7 +94,7 @@ cmd_run() {
   # Like create-t3-app: ask on a terminal, unless told what to do (Steps named,
   # -y, an upgrade or a dry run, which must not download the picker).
   if [ ${#targets[@]} -eq 0 ] && [ ${#FORCE[@]} -eq 0 ] && [ "$yes" = 0 ] && [ "$dry" = 0 ] &&
-    [ "$MIP_MODE" = install ] && [ "$MIP_INTERACTIVE" = 1 ] && [ -t 0 ] && [ -t 1 ]; then
+    [ "$mode" = install ] && [ "$MIP_INTERACTIVE" = 1 ] && [ -t 0 ] && [ -t 1 ]; then
     picked="$(pick_steps)" || rc=$?
     if [ "$rc" = 130 ]; then echo "Cancelled; nothing was run."; return 130; fi
     if [ "$rc" != 0 ]; then
@@ -101,14 +103,21 @@ cmd_run() {
       echo "No Steps selected; nothing to do."; return 0
     else
       mapfile -t targets <<<"$picked"
+      # Ticked although done: upgrade it, or re-run it if it has no upgrade().
       for s in "${targets[@]}"; do
-        if [ "$(check_status "$s")" = "done" ]; then FORCE[$s]=1; fi   # ticked although done: re-run it
+        [ "$(check_status "$s")" = "done" ] || continue
+        if action_defines "$s" upgrade; then UPGRADE[$s]=1; else FORCE[$s]=1; fi
       done
     fi
   fi
 
   local -a plan
   mapfile -t plan < <(pipeline_select "${targets[@]}")
+  for s in "${plan[@]}"; do
+    if [ -n "${FORCE[$s]:-}" ]; then STEP_MODE[$s]=force
+    elif [ -n "${UPGRADE[$s]:-}" ]; then STEP_MODE[$s]=upgrade
+    else STEP_MODE[$s]="$mode"; fi
+  done
 
   if [ "$dry" = 1 ]; then
     printf '%-15s %-6s %-12s %s\n' STEP CHECK INTERACTIVE REQUIRES
@@ -151,8 +160,20 @@ shell_hint() {
   printf '\nShell setup changed. To use it in this shell, run:  source %s\n' "${MIP_BASHRC/#$HOME/\~}"
 }
 
+# cmd_update [COMMAND...] — fast-forward this checkout to its upstream (like
+# `brew update`), then hand COMMAND to the new init.sh. Bash reads a script as
+# it runs, so nothing of this one runs after the pull but the exec.
+cmd_update() {
+  git -C "$MIP_ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "$MIP_ROOT is not a git checkout; re-run bootstrap.sh"
+  git -C "$MIP_ROOT" pull --ff-only --quiet ||
+    die "could not fast-forward $MIP_ROOT (local commits or conflicting changes); sort it out with git, then retry"
+  echo "my-init-pipeline: $(git -C "$MIP_ROOT" log -1 --format='%h %s')"
+  if [ $# -gt 0 ]; then exec "$MIP_ROOT/init.sh" "$@"; fi
+}
+
 case "${1:-help}" in
   run) shift; cmd_run "$@" ;;
+  update) shift; cmd_update "$@" ;;
   list) shift; cmd_list "$@" ;;
   describe) shift; cmd_describe "$@" ;;
   help | -h | --help) usage ;;

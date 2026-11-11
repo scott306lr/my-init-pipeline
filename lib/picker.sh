@@ -26,7 +26,7 @@ gum_bin() {
 
 # pick_steps — show every Step with its summary and Check result; print the
 # ticked Step names. Steps with work to do start ticked, so Enter runs what a
-# Run without the picker would. Exit status: 130 when cancelled, other non-zero
+# Run without the picker would; ticking a done Step upgrades it. Exit status: 130 when cancelled, other non-zero
 # when no picker could be shown.
 pick_steps() {
   local gum s st mark label
@@ -42,6 +42,6 @@ pick_steps() {
     if [ "$st" = todo ]; then ticked+=("$label"); fi
   done
   "$gum" choose --no-limit --label-delimiter $'\t' --height "$((${#STEPS[@]} + 1))" \
-    --header "Steps to run (ticked = run; a ticked 'done' Step is re-run)" \
+    --header "Steps to run (ticked = install; a ticked 'done' Step is upgraded)" \
     --selected "$(IFS=,; printf '%s' "${ticked[*]}")" "${opts[@]}"
 }

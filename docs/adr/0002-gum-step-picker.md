@@ -4,8 +4,9 @@
 every Step and runs the ticked ones (plus what they require). This follows
 create-t3-app: prompt by default, `-y` to take the defaults, and no prompt
 without a terminal. The defaults are the Steps with work to do, so Enter does
-what a plain Run did before. A ticked Step whose Check passes is re-run, the
-one way the checklist does more than the defaults.
+what a plain Run did before. A ticked Step whose Check passes is upgraded (its
+`upgrade()`, or a re-run when it has none), so one checklist both installs and
+updates, Step by Step.
 
 create-t3-app builds its prompts with `@clack/prompts`, which needs Node, and
 ADR 0001 allows nothing a fresh server lacks. We use charmbracelet/gum's

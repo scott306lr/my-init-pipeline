@@ -35,4 +35,4 @@ upgrade() { uv python upgrade $MANAGED_PYTHON_VERSIONS; }
 # managed_python V — path of the uv-managed interpreter for V; fails if none.
 managed_python() { uv python find --system --python-preference only-managed "$1"; }
 
-note() { echo "Python: venvs built on a system Python keep it; recreate them (uv venv / uv sync) to get a managed one with headers."; }
+note() { [ "$1" = upgraded ] || echo "Python: venvs built on a system Python keep it; recreate them (uv venv / uv sync) to get a managed one with headers."; }

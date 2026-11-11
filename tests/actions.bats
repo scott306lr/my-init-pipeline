@@ -12,7 +12,7 @@ setup() {
   ln -s "$T/repo/settings.json" "$HOME/.claude/settings.json"
 }
 
-action() { bash "$ROOT/lib/step.sh" "$ROOT/actions/$1.sh" "$2"; }
+action() { bash "$ROOT/lib/step.sh" "$ROOT/actions/$1.sh" "${@:2}"; }
 
 settings() {  # settings ABS PORTABLE — write a SessionStart list with those hooks
   python3 - "$HOME" "$1" "$2" >"$T/repo/settings.json" <<'PY'
@@ -63,6 +63,46 @@ session_commands() {
   before="$(stat -c %Y.%s "$T/repo/settings.json")"; sleep 1
   action herdr-install portable_hooks
   [ "$(stat -c %Y.%s "$T/repo/settings.json")" = "$before" ]
+}
+
+# setup_clone — an origin and a clone of a claude setup repo whose install.sh
+# only records that it ran.
+setup_clone() {
+  git -C "$T" init -q -b main setup-origin
+  printf '#!/bin/sh\necho installed >>"%s/installs"\n' "$T" >"$T/setup-origin/install.sh"
+  chmod +x "$T/setup-origin/install.sh"
+  gitc() { git -c user.name=t -c user.email=t@t "$@"; }
+  gitc -C "$T/setup-origin" add -A && gitc -C "$T/setup-origin" commit -qm one
+  git clone -q "$T/setup-origin" "$T/setup"
+  echo new >"$T/setup-origin/cfg" && gitc -C "$T/setup-origin" add cfg && gitc -C "$T/setup-origin" commit -qm two
+  export CLAUDE_SETUP_DIR="$T/setup"
+}
+
+@test "claude-config: upgrade fast-forwards the clone, then re-runs install.sh" {
+  setup_clone
+  action claude-config upgrade
+  [ "$(cat "$T/setup/cfg")" = new ] && [ "$(cat "$T/installs")" = installed ]
+  run action claude-config note upgraded
+  [ -z "$output" ]
+}
+
+@test "claude-config: upgrade leaves a clone with your work alone and says so in the Note" {
+  setup_clone
+  echo mine >"$T/setup/local-edit"
+  action claude-config upgrade
+  [ ! -e "$T/setup/cfg" ] && [ "$(cat "$T/installs")" = installed ]
+  run action claude-config note upgraded
+  [[ "$output" == *"uncommitted changes"*"/sync-claude"* ]]
+  run action claude-config note ran                    # a first install says nothing about pulling
+  [[ "$output" != *"sync-claude"* ]]
+
+  rm "$T/setup/local-edit"
+  echo other >"$T/setup/cfg"
+  git -C "$T/setup" add cfg && git -C "$T/setup" -c user.name=t -c user.email=t@t commit -qm diverge
+  action claude-config upgrade
+  [ "$(cat "$T/setup/cfg")" = other ]
+  run action claude-config note upgraded
+  [[ "$output" == *"could not be fast-forwarded"* ]]
 }
 
 @test "claude-config: clone URL follows CLAUDE_SETUP_PROTOCOL" {

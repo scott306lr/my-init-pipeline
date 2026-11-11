@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: step.sh ACTION_FILE FUNCTION
+# Usage: step.sh ACTION_FILE FUNCTION [ARG...]
 #
 # Runs one function (check | run | upgrade | note) of an Action in a fresh
 # shell, so Actions never see the runner's internals and every Step picks up
@@ -18,4 +18,4 @@ load_env
 . "$1"
 
 declare -F "$2" >/dev/null || exit 3
-"$2"
+"$2" "${@:3}"

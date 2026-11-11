@@ -16,4 +16,4 @@ run() {
 
 upgrade() { claude update; }
 
-note() { echo "Log in to Claude Code: run 'claude' and use /login."; }
+note() { [ "$1" = upgraded ] || echo "Log in to Claude Code: run 'claude' and use /login."; }

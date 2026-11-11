@@ -13,4 +13,4 @@ run() {
 
 upgrade() { uv tool upgrade huggingface_hub; }
 
-note() { echo "Hugging Face: run 'hf auth login' for gated or private models."; }
+note() { [ "$1" = upgraded ] || echo "Hugging Face: run 'hf auth login' for gated or private models."; }

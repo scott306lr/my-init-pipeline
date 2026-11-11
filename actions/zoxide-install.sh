@@ -26,4 +26,4 @@ install_zoxide() {
   zoxide --version
 }
 
-note() { echo "zoxide: in a new shell, 'z <part of a dir>' jumps there; 'zi' picks interactively (needs fzf)."; }
+note() { [ "$1" = upgraded ] || echo "zoxide: in a new shell, 'z <part of a dir>' jumps there; 'zi' picks interactively (needs fzf)."; }
