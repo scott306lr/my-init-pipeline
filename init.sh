@@ -175,6 +175,15 @@ cmd_update() {
   if [ $# -gt 0 ]; then exec "$MIP_ROOT/init.sh" "$@"; fi
 }
 
+# Like Homebrew's installer: everything lands in the invoking user's home, so
+# root would set up root's account (and leave root-owned files in yours). The
+# one Step that needs root, hf-export, asks for sudo itself.
+case "${1:-help}" in run | update)
+  if [ "${EUID:-$(id -u)}" = 0 ]; then
+    die "don't run my-init-pipeline as root (sudo): run it as yourself; a Step that needs root asks for sudo itself"
+  fi ;;
+esac
+
 case "${1:-help}" in
   run) shift; cmd_run "$@" ;;
   update) shift; cmd_update "$@" ;;

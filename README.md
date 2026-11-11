@@ -129,7 +129,8 @@ line; validation reports anything that still requires it.
 | `CLAUDE_SETUP_REF` | *(default branch)* | branch for a fresh clone, e.g. to test a change before merging it |
 | `GIT_USER_NAME` | `scott306lr` | git `user.name`, written only if `~/.gitconfig` has none |
 | `GIT_USER_EMAIL` | `scott306lr@gmail.com` | git `user.email`, likewise |
-| `HF_HUB_CACHE_DIR` | *(empty: asked on the terminal)* | exported as `HF_HUB_CACHE` (model and dataset downloads) for every shell, e.g. `/data/hf/hub`. `HF_HOME` is left at `~/.cache/huggingface`, so the token stays private. Change it later with `./init.sh run --force hf-cache hf-cache`; existing downloads are not moved |
+| `HF_HUB_CACHE_DIR` | *(empty: asked on the terminal, suggesting `HF_HUB_CACHE_SUGGESTED`)* | exported as `HF_HUB_CACHE` (model and dataset downloads) for every shell, e.g. `/data/hf/hub`. `HF_HOME` is left at `~/.cache/huggingface`, so the token stays private. Change it later with `./init.sh run --force hf-cache hf-cache`; existing downloads are not moved |
+| `HF_HUB_CACHE_SUGGESTED` | `/shared/huggingface_cache/hub` | what that question offers when no `HF_HUB_CACHE` is in effect yet; Enter takes it |
 | `HF_HUB_CACHE_SHARED` | *(empty: asked)* | `yes` shares an `HF_HUB_CACHE_DIR` outside your home with every user of the server, `no` keeps it yours (see below) |
 | `MANAGED_PYTHON_VERSIONS` | `3.10 3.12` | installed with `uv python install`; `UV_PYTHON_PREFERENCE=only-managed` is exported so `uv venv` / `uv sync` use them (they have `Python.h`) instead of a system Python that may lack its `-dev` package |
 
@@ -156,8 +157,9 @@ nothing.
 
 Making it every user's default, including users who don't run this Pipeline,
 needs root: tick the optional `hf-export` Step in the checklist, or run
-`./init.sh run hf-export`. It prints the sudo command before running it, and asks
-for a password only if sudo needs one. The same root run also opens any parent
+`./init.sh run hf-export`. It takes the terminal, prints the sudo command, and
+sudo asks for your password. Never run `init.sh` itself with sudo: it would set
+up root's account instead of yours, so it refuses. The same root run also opens any parent
 folder others can't enter and installs `acl` when `setfacl` is missing. Without
 the Pipeline, root runs the script directly, no clone needed:
 
@@ -195,7 +197,7 @@ dry run, the admin test and the non-interactive e2e.
 
 The checklist is [gum](https://github.com/charmbracelet/gum) `choose`, pinned and
 checksum-verified, fetched on first use into `~/.local/state/my-init-pipeline/bin`
-(it is the runner's helper, not a Tool on your PATH). If it can't be fetched, the
-Run warns and runs every Step.
+(it is the runner's helper, not a Tool on your PATH). Space ticks and unticks, `a`
+ticks all, Enter runs. If gum can't be fetched, the Run warns and runs every Step.
 
 Design decisions: [docs/adr/](docs/adr/).

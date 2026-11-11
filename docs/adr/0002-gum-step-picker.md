@@ -24,3 +24,9 @@ directory. We rejected:
   fetched, the Run warns and runs every Step, so no Run is blocked on it.
 - No picker for `--dry-run` (it must not download anything) or `--upgrade`.
 - gum splits `--selected` on commas, so Step labels have their commas replaced.
+- The pin is gum v0.17.0, not v2: v2's `choose` binds toggle to `" "`, but
+  Bubble Tea v2 reports that key as `"space"` (ultraviolet `Key.String`), so space
+  never toggles in v2 (checked in gum v2.0.2 and main, 2026-11-11). v0.17.0
+  runs on Bubble Tea v1, where space is `" "`. The checklist hides gum's own key
+  help (which says `x`) and names space in its header. Move to v2 once gum binds
+  `"space"`.

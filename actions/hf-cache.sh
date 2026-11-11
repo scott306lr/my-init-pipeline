@@ -5,7 +5,8 @@
 #          ~/.cache/huggingface, so the login token (and other per-user state)
 #          never lands on a shared or big disk. The Run asks for the directory,
 #          defaulting to the HF_HUB_CACHE already in effect (recorded here, or
-#          exported system-wide), unless HF_HUB_CACHE_DIR is set. For a
+#          exported system-wide), else HF_HUB_CACHE_SUGGESTED, unless
+#          HF_HUB_CACHE_DIR is set. For a
 #          directory outside your home that is not shared yet, it also asks
 #          whether to share it with every user of the server, unless
 #          HF_HUB_CACHE_SHARED (yes/no) answers; sharing runs
@@ -38,8 +39,11 @@ run() {
   legacy="$(legacy_home)"
   if [ -z "$dir" ]; then
     def="${HF_HUB_CACHE:-}"   # env.sh is loaded, so the recorded value wins over the system one
-    if [ -z "$def" ] && [ -n "$legacy" ] && [ -d "$legacy/hub" ]; then def="$legacy/hub"; fi
-    def="${def:-$HF_HOME_DEFAULT/hub}"
+    # A relocated HF_HOME's downloads, where the former hf-home Step put them.
+    if [ -z "$def" ] && [ -n "$legacy" ] && ! [ "$legacy" -ef "$HF_HOME_DEFAULT" ] && [ -d "$legacy/hub" ]; then
+      def="$legacy/hub"
+    fi
+    def="${def:-$HF_HUB_CACHE_SUGGESTED}"
     read -r -p "HF_HUB_CACHE directory [$def]: " dir || true   # EOF: take the default
     dir="${dir:-$def}"
     dir="${dir/#\~/$HOME}"

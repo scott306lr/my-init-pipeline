@@ -6,6 +6,7 @@ load helpers
 setup() {
   setup_pipeline
   unset HF_HUB_CACHE HF_HOME   # the developer's own Hugging Face settings
+  export HF_HUB_CACHE_SUGGESTED="$T/suggested/hub"   # never the real /shared
   export MIP_USER_CONFIG="$ROOT/config.sh"
   mkdir -p "$HOME/.claude" "$T/repo"
   # settings.json is a symlink into the setup repo, as claude-config leaves it.
@@ -176,9 +177,9 @@ hfc() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" "$1"; }
   export MIP_USER_CONFIG="$T/config.sh"
   run hfc check
   [ "$status" -eq 1 ]                        # not na: a human can answer it
-  run hfc run </dev/null                     # no terminal and nothing recorded: HF's default applies
+  run hfc run </dev/null                     # no terminal and nothing recorded: the suggestion applies
   [ "$status" -eq 0 ]
-  grep -qxF 'export HF_HUB_CACHE="$HOME/.cache/huggingface/hub"' "$(envf)"
+  grep -qxF "export HF_HUB_CACHE=\"$T/suggested/hub\"" "$(envf)"
   printf '%s/\n' "$T/picked" | hfc run
   grep -qxF "export HF_HUB_CACHE=\"$T/picked\"" "$(envf)"
   printf '\n' | hfc run
@@ -245,6 +246,15 @@ hfc() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" "$1"; }
   [[ "$output" == *"left $T/old/token"* ]]
   [ "$(cat "$HOME/.cache/huggingface/token")" = new ] && [ "$(cat "$T/old/token")" = old ]
   grep -qxF "export HF_HUB_CACHE=\"$T/old/hub\"" "$(envf)"
+  ! grep -q '^export HF_HOME=' "$(envf)"
+}
+
+@test "hf-cache: an HF_HOME export of the default location does not make its hub the suggestion" {
+  mkdir -p "$HOME/.cache/huggingface/hub/models--x" "$HOME/.config/my-init-pipeline"
+  printf 'export HF_HOME="$HOME/.cache/huggingface"\n' >"$(envf)"
+  printf 'HF_HUB_CACHE_DIR=\nHF_HUB_CACHE_SHARED=no\n' >"$T/config.sh"
+  MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  grep -qxF "export HF_HUB_CACHE=\"$T/suggested/hub\"" "$(envf)"
   ! grep -q '^export HF_HOME=' "$(envf)"
 }
 
@@ -385,13 +395,10 @@ share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >
   [ "$status" -eq 1 ]                        # /etc/profile.d does not export this test directory
 }
 
-@test "hf-export: needs a terminal only when sudo needs a password; run prints the sudo command, or what to ask an admin" {
+@test "hf-export: run prints the sudo command, or what to ask an admin" {
   mkdir -p "$T/bin"
   printf '#!/bin/sh\necho "$*" >>"%s/sudo.calls"\nexit "${SUDO_RC:-0}"\n' "$T" >"$T/bin/sudo"; chmod +x "$T/bin/sudo"
   export PATH="$T/bin:$PATH"
-  run env SUDO_RC=0 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" interactive
-  [ "$status" -eq 1 ]
-  SUDO_RC=1 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" interactive
   run env SUDO_RC=0 HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run
   [ "$status" -eq 0 ] && [[ "$output" == *"hf-export needs sudo: sudo bash $ROOT/admin/share-hf-cache.sh $T/srv/hub"* ]]
   grep -qxF "bash $ROOT/admin/share-hf-cache.sh $T/srv/hub" "$T/sudo.calls"

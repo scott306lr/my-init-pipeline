@@ -10,12 +10,11 @@
 #          /etc/environment, and any parent folder others cannot enter. Its Check
 #          does not wait for hf-cache: before hf-cache has recorded a directory
 #          there is work to do, so the picker offers it on a fresh server too.
-#          It needs a terminal only when sudo asks for a password. Without sudo
-#          it fails with the command to give an admin.
+#          It always takes the terminal, so sudo can ask for a password whenever
+#          it needs one (cached credentials can expire between a check and the
+#          run). Without sudo it fails with the command to give an admin.
 
 SHARE="$MIP_ROOT/admin/share-hf-cache.sh"
-
-interactive() { ! sudo -n true 2>/dev/null; }
 
 check() {
   local dir="${HF_HUB_CACHE:-}"   # env.sh is loaded: the hf-cache Step's value

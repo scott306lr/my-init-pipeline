@@ -8,7 +8,8 @@
 #   - a user runs the hf-cache Step on a directory they create: it is shared
 #     without sudo, and a user who never ran anything can write to it;
 #   - the optional hf-export Step, named, makes that directory every user's
-#     HF_HUB_CACHE with sudo.
+#     HF_HUB_CACHE with sudo;
+#   - init.sh refuses to run as root.
 #
 #   tests/share-root.sh REPO_DIR    (as root)
 set -euo pipefail
@@ -51,8 +52,11 @@ as carol 'echo c >>/srv/team/hub/models--y/f && mkdir /srv/team/hub/models--y/su
 # not chosen). dave has passwordless sudo, so it needs no terminal.
 command -v sudo >/dev/null || { apt-get install -y -qq sudo >/dev/null 2>&1 || apt-get update -qq && apt-get install -y -qq sudo >/dev/null; }
 echo 'dave ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/dave
-login dave "/opt/mip/init.sh run hf-export </dev/null" >/tmp/run.out 2>&1 \
+# hf-export always takes the terminal: give it one (util-linux script).
+login dave "script -qec '/opt/mip/init.sh run hf-export' /dev/null" >/tmp/run.out 2>&1 \
   || { cat /tmp/run.out /home/dave/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-export run failed"; }
 grep -q 'hf-export *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-export did not run"; }
 [ "$(login carol 'echo $HF_HUB_CACHE')" = /srv/team/hub ] || fail "a new login does not get the exported HF_HUB_CACHE"
+/opt/mip/init.sh run -y >/tmp/root.out 2>&1 && fail "init.sh ran as root"
+grep -q "don't run my-init-pipeline as root" /tmp/root.out || { cat /tmp/root.out; fail "no root refusal message"; }
 echo "admin: ok"

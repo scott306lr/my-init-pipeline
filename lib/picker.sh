@@ -1,15 +1,17 @@
 # Step picker: the checklist `./init.sh run` shows on a terminal (ADR 0002).
 # Sourced by init.sh after lib/pipeline.sh.
 
-GUM_VERSION=2.0.2
+# v0.17.0, not v2: gum v2's choose binds toggle to " ", but Bubble Tea v2 names
+# that key "space", so space never toggles there (ADR 0002).
+GUM_VERSION=0.17.0
 
 # gum_bin — path to a pinned gum, fetched on first use (checksum verified) into
-# the state dir, so it is a helper of the runner, not a Tool on PATH.
-# MIP_GUM overrides it (tests).
+# a per-version folder of the state dir, so it is a helper of the runner, not a
+# Tool on PATH. MIP_GUM overrides it (tests).
 gum_bin() {
-  local dir="$MIP_STATE_DIR/bin" arch file base sha
+  local dir="$MIP_STATE_DIR/bin/gum-$GUM_VERSION" arch file base sha
   if [ -n "${MIP_GUM:-}" ]; then printf '%s\n' "$MIP_GUM"; return; fi
-  if [ ! -x "$dir/gum" ] || [ "$("$dir/gum" --version 2>/dev/null)" != "gum version v$GUM_VERSION" ]; then
+  if [ ! -x "$dir/gum" ]; then
     case "$(uname -m)" in
       x86_64 | amd64) arch=x86_64 ;;
       aarch64 | arm64) arch=arm64 ;;
@@ -43,7 +45,8 @@ pick_steps() {
     opts+=("$label"$'\t'"$s")
     if [ "$st" = todo ] && [ "$mark" != opt ]; then ticked+=("$label"); fi
   done
-  "$gum" choose --no-limit --label-delimiter $'\t' --height "$((${#STEPS[@]} + 1))" \
-    --header "Steps to run (ticked = install; 'opt' = optional, off unless ticked; a ticked 'done' Step is upgraded)" \
+  "$gum" choose --no-limit --no-show-help --label-delimiter $'\t' --height "$((${#STEPS[@]} + 1))" \
+    --header "$(printf '%s\n' "Steps to run: ticked ones install; 'opt' = optional, off unless ticked; a ticked 'done' Step is upgraded" \
+      "space: tick/untick   a: all   enter: run   ctrl+c: cancel")" \
     --selected "$(IFS=,; printf '%s' "${ticked[*]}")" "${opts[@]}"
 }

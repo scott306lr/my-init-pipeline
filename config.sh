@@ -21,6 +21,9 @@ GIT_USER_EMAIL="${GIT_USER_EMAIL:-scott306lr@gmail.com}"
 # Empty: the hf-cache Step asks on the terminal instead (and is deferred in a
 # non-interactive Run).
 HF_HUB_CACHE_DIR="${HF_HUB_CACHE_DIR:-}"
+# What the hf-cache Step offers when HF_HUB_CACHE_DIR is empty and no
+# HF_HUB_CACHE is in effect yet (Enter takes it).
+HF_HUB_CACHE_SUGGESTED="${HF_HUB_CACHE_SUGGESTED:-/shared/huggingface_cache/hub}"
 # Share HF_HUB_CACHE_DIR with every user of the server (yes/no) when it lies
 # outside your home. Empty: the hf-cache Step asks.
 HF_HUB_CACHE_SHARED="${HF_HUB_CACHE_SHARED:-}"
