@@ -4,6 +4,7 @@
 #
 #   admin/share-hf-cache.sh DIR           share DIR (as its owner, or as root)
 #   admin/share-hf-cache.sh --check DIR   exit 0 if DIR is shared
+#   admin/share-hf-cache.sh --exported DIR  exit 0 if HF_HUB_CACHE=DIR is exported system-wide
 #   curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- DIR
 #
 # As DIR's owner (the hf-cache Step runs it so): creates DIR if missing and lets
@@ -24,15 +25,18 @@ set -euo pipefail
 # Everything lives in main, called on the last line: a truncated download
 # defines a function that is never called instead of running half a script.
 main() {
-  local check=0 root=0 dir p
-  if [ "${1:-}" = --check ]; then check=1; shift; fi
+  local query="" root=0 dir p
+  case "${1:-}" in --check | --exported) query="$1"; shift ;; esac
   if [ $# -ne 1 ]; then
-    echo "usage: share-hf-cache.sh [--check] DIR" >&2
+    echo "usage: share-hf-cache.sh [--check | --exported] DIR" >&2
     exit 2
   fi
   dir="${1%/}"
   case "$dir" in /?*) ;; *) die "DIR must be an absolute path: $dir" ;; esac
-  if [ "$check" = 1 ]; then is_shared "$dir"; return; fi
+  case "$query" in
+    --check) is_shared "$dir"; return ;;
+    --exported) [ "$(cat "$PROFILE" 2>/dev/null)" = "$(printf 'export HF_HUB_CACHE=%q' "$dir")" ]; return ;;
+  esac
   if [ "$(id -u)" = 0 ]; then root=1; fi
 
   if [ "$root" = 1 ]; then
@@ -69,13 +73,16 @@ main() {
   done
 
   if [ "$root" = 1 ]; then
-    printf 'export HF_HUB_CACHE=%q\n' "$dir" >/etc/profile.d/hf-hub-cache.sh
-    chmod 644 /etc/profile.d/hf-hub-cache.sh
+    printf 'export HF_HUB_CACHE=%q\n' "$dir" >"$PROFILE"
+    chmod 644 "$PROFILE"
     sed -i '/^HF_HUB_CACHE=/d' /etc/environment
     printf 'HF_HUB_CACHE=%s\n' "$dir" >>/etc/environment
     echo "HF_HUB_CACHE=$dir for every user from their next login"
   fi
   echo "$dir is shared with every user of this server"
+  if [ "$root" = 0 ] && ! main --exported "$dir"; then
+    echo "For users who don't run my-init-pipeline, root can export it for everyone: sudo bash $0 $dir"
+  fi
 }
 
 # is_shared DIR — everyone may add entries to DIR, and so may they to new subdirectories.
@@ -84,6 +91,8 @@ is_shared() {
   [ -d "$1" ] && acl="$(getfacl -p "$1" 2>/dev/null)" || return 1
   grep -qx 'other::rwx' <<<"$acl" && grep -qx 'default:other::rwx' <<<"$acl"
 }
+
+PROFILE=/etc/profile.d/hf-hub-cache.sh
 
 die() { echo "error: $*" >&2; exit 1; }
 

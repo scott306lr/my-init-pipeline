@@ -346,6 +346,8 @@ share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >
   getfacl -p "$T/srv/hub" | grep -qx 'other::rwx'
   getfacl -p "$T/srv/hub" | grep -qx 'default:other::rwx'
   hfc check
+  run hfc note                               # not exported system-wide here: say how
+  [[ "$output" == *"sudo bash $ROOT/admin/share-hf-cache.sh $T/srv/hub"* ]]
   setfacl -b "$T/srv/hub"; chmod 755 "$T/srv/hub"
   run hfc check
   [ "$status" -eq 1 ]
