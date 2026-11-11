@@ -16,6 +16,14 @@ main() {
   local url="${MIP_REPO_URL:-https://github.com/scott306lr/my-init-pipeline.git}"
   local dir="${MIP_DIR:-$HOME/my-init-pipeline}"
 
+  # Before cloning, so `curl … | sudo bash` leaves nothing behind in /root. Same
+  # rule as lib/common.sh root_outside_container (Homebrew's installer allows
+  # root only in containers and CI jobs).
+  if [ "$EUID" = 0 ] && [ ! -f /.dockerenv ] && [ ! -f /run/.containerenv ] &&
+    ! { [ -f /proc/1/cgroup ] && grep -Eq 'azpl_job|actions_job|docker|garden|kubepods' /proc/1/cgroup; }; then
+    echo "error: don't run this as root (sudo): run it as yourself; a Step that needs root asks for sudo itself" >&2
+    exit 1
+  fi
   command -v git >/dev/null || { echo "error: git is required" >&2; exit 1; }
   command -v curl >/dev/null || { echo "error: curl is required" >&2; exit 1; }
 

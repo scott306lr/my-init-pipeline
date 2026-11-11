@@ -22,6 +22,8 @@ gum_bin() {
     base="https://github.com/charmbracelet/gum/releases/download/v$GUM_VERSION"
     sha="$(release_sha256 "$base/checksums.txt" "$file")" && [ -n "$sha" ] || return 1
     install_release_binary "$base/$file" gum "$sha" "$dir" >/dev/null || return 1
+    # Earlier pins (bin/gum-<ver>/, and v2.0.2's bin/gum) are dead weight now.
+    find "$MIP_STATE_DIR/bin" -mindepth 1 -maxdepth 1 \( -name gum -o -name 'gum-*' \) ! -name "gum-$GUM_VERSION" -exec rm -rf {} +
   fi
   printf '%s\n' "$dir/gum"
 }

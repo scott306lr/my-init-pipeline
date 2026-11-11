@@ -14,6 +14,16 @@ info() { printf '  %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
+# root_outside_container — true when running as root on a real machine. As in
+# Homebrew's installer (check_run_command_as_root), root is normal in a container
+# or a CI job, so those count as not. bootstrap.sh keeps its own copy (it runs
+# before the clone exists).
+root_outside_container() {
+  [ "$EUID" = 0 ] || return 1
+  if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then return 1; fi
+  if [ -f /proc/1/cgroup ] && grep -Eq 'azpl_job|actions_job|docker|garden|kubepods' /proc/1/cgroup; then return 1; fi
+}
+
 # have CMD — true if CMD resolves on PATH.
 have() { command -v "$1" >/dev/null 2>&1; }
 

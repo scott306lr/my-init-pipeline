@@ -88,6 +88,7 @@ cmd_run() {
     shift
   done
 
+  if [ "$dry" = 0 ]; then refuse_root; fi
   load_pipeline
   local s
   for s in "${targets[@]}" "${!FORCE[@]}"; do need_step "$s"; done
@@ -150,6 +151,16 @@ cmd_run() {
   return "$rc"
 }
 
+# refuse_root — everything lands in the invoking user's home, so sudo would set
+# up root's account and leave root-owned files in yours; the one Step that needs
+# root, hf-export, asks for sudo itself. Containers and CI jobs run as root
+# legitimately, as Homebrew's installer allows.
+refuse_root() {
+  if root_outside_container; then
+    die "don't run my-init-pipeline as root (sudo): run it as yourself; a Step that needs root asks for sudo itself"
+  fi
+}
+
 env_digest() { cksum "$MIP_ENV_FILE" 2>/dev/null || true; }
 
 # shell_hint DIGEST_BEFORE — a child process can't update the calling shell, so
@@ -168,21 +179,13 @@ shell_hint() {
 # `brew update`), then hand COMMAND to the new init.sh. Bash reads a script as
 # it runs, so nothing of this one runs after the pull but the exec.
 cmd_update() {
+  refuse_root   # a pull as root leaves root-owned files in your checkout
   git -C "$MIP_ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "$MIP_ROOT is not a git checkout; re-run bootstrap.sh"
   git -C "$MIP_ROOT" pull --ff-only --quiet ||
     die "could not fast-forward $MIP_ROOT (local commits or conflicting changes); sort it out with git, then retry"
   echo "my-init-pipeline: $(git -C "$MIP_ROOT" log -1 --format='%h %s')"
   if [ $# -gt 0 ]; then exec "$MIP_ROOT/init.sh" "$@"; fi
 }
-
-# Like Homebrew's installer: everything lands in the invoking user's home, so
-# root would set up root's account (and leave root-owned files in yours). The
-# one Step that needs root, hf-export, asks for sudo itself.
-case "${1:-help}" in run | update)
-  if [ "${EUID:-$(id -u)}" = 0 ]; then
-    die "don't run my-init-pipeline as root (sudo): run it as yourself; a Step that needs root asks for sudo itself"
-  fi ;;
-esac
 
 case "${1:-help}" in
   run) shift; cmd_run "$@" ;;

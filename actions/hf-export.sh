@@ -10,11 +10,16 @@
 #          /etc/environment, and any parent folder others cannot enter. Its Check
 #          does not wait for hf-cache: before hf-cache has recorded a directory
 #          there is work to do, so the picker offers it on a fresh server too.
-#          It always takes the terminal, so sudo can ask for a password whenever
-#          it needs one (cached credentials can expire between a check and the
-#          run). Without sudo it fails with the command to give an admin.
+#          It takes the terminal when sudo needs a password; with passwordless
+#          (or freshly cached) sudo it runs without one, using `sudo -n`, so a
+#          credential that expires between the check and the run fails at once
+#          with "run it on a terminal" instead of hanging. Without sudo it
+#          fails with the command to give an admin.
 
 SHARE="$MIP_ROOT/admin/share-hf-cache.sh"
+
+# A terminal only when sudo would ask for a password.
+interactive() { ! sudo -n true 2>/dev/null; }
 
 check() {
   local dir="${HF_HUB_CACHE:-}"   # env.sh is loaded: the hf-cache Step's value
@@ -27,8 +32,11 @@ check() {
 run() {
   [ -n "${HF_HUB_CACHE:-}" ] || die "no HF_HUB_CACHE yet; run the hf-cache Step first"
   local -a cmd=(sudo bash "$SHARE" "$HF_HUB_CACHE")
+  if [ ! -t 0 ]; then cmd=(sudo -n "${cmd[@]:1}"); fi   # no terminal: sudo must not prompt
   warn "hf-export needs sudo: ${cmd[*]}"
-  "${cmd[@]}" || die "sudo failed; ask an admin to run: curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- $HF_HUB_CACHE"
+  "${cmd[@]}" && return
+  if [ ! -t 0 ]; then die "sudo needs a password; run it on a terminal: ./init.sh run hf-export"; fi
+  die "sudo failed; ask an admin to run: curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- $HF_HUB_CACHE"
 }
 
 note() { echo "Users pick up HF_HUB_CACHE=$HF_HUB_CACHE at their next login"; }

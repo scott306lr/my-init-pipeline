@@ -249,13 +249,22 @@ hfc() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" "$1"; }
   ! grep -q '^export HF_HOME=' "$(envf)"
 }
 
-@test "hf-cache: an HF_HOME export of the default location does not make its hub the suggestion" {
-  mkdir -p "$HOME/.cache/huggingface/hub/models--x" "$HOME/.config/my-init-pipeline"
-  printf 'export HF_HOME="$HOME/.cache/huggingface"\n' >"$(envf)"
+@test "hf-cache: the suggestion keeps existing downloads in ~/.cache/huggingface/hub, and falls back when it cannot be created" {
   printf 'HF_HUB_CACHE_DIR=\nHF_HUB_CACHE_SHARED=no\n' >"$T/config.sh"
-  MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  export MIP_USER_CONFIG="$T/config.sh"
+  mkdir -p "$T/ro"; chmod 555 "$T/ro"
+  HF_HUB_CACHE_SUGGESTED="$T/ro/shared/hub" hfc run </dev/null     # not creatable: HF's default
+  chmod 755 "$T/ro"
+  grep -qxF 'export HF_HUB_CACHE="$HOME/.cache/huggingface/hub"' "$(envf)"
+  rm "$(envf)"
+  hfc run </dev/null                         # no downloads yet: the suggestion
   grep -qxF "export HF_HUB_CACHE=\"$T/suggested/hub\"" "$(envf)"
-  ! grep -q '^export HF_HOME=' "$(envf)"
+  rm "$(envf)"
+  mkdir -p "$HOME/.cache/huggingface/hub/models--x"
+  hfc run </dev/null                         # downloads already there: kept
+  grep -qxF 'export HF_HUB_CACHE="$HOME/.cache/huggingface/hub"' "$(envf)"
+  run env HF_HUB_CACHE_SUGGESTED= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  [ "$status" -eq 0 ]                        # an empty setting falls back too
 }
 
 @test "hf-cache: Note tells a shell that still has HF_HOME to drop it" {
@@ -395,13 +404,30 @@ share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >
   [ "$status" -eq 1 ]                        # /etc/profile.d does not export this test directory
 }
 
-@test "hf-export: run prints the sudo command, or what to ask an admin" {
+@test "hf-export: a terminal only when sudo needs a password; without one it never lets sudo prompt" {
   mkdir -p "$T/bin"
   printf '#!/bin/sh\necho "$*" >>"%s/sudo.calls"\nexit "${SUDO_RC:-0}"\n' "$T" >"$T/bin/sudo"; chmod +x "$T/bin/sudo"
   export PATH="$T/bin:$PATH"
-  run env SUDO_RC=0 HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run
+  run env SUDO_RC=0 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" interactive
+  [ "$status" -eq 1 ]
+  SUDO_RC=1 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" interactive
+  : >"$T/sudo.calls"
+  run env SUDO_RC=0 HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  [ "$status" -eq 0 ]
+  grep -qxF -- "-n bash $ROOT/admin/share-hf-cache.sh $T/srv/hub" "$T/sudo.calls"
+  run env SUDO_RC=1 HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  [ "$status" -ne 0 ] && [[ "$output" == *"run it on a terminal: ./init.sh run hf-export"* ]]
+}
+
+@test "hf-export: on a terminal, run prints the sudo command, or what to ask an admin" {
+  command -v script >/dev/null || skip "util-linux script not available"
+  mkdir -p "$T/bin"
+  printf '#!/bin/sh\necho "$*" >>"%s/sudo.calls"\nexit "${SUDO_RC:-0}"\n' "$T" >"$T/bin/sudo"; chmod +x "$T/bin/sudo"
+  export PATH="$T/bin:$PATH"
+  on_tty() { script -qec "env SUDO_RC=$1 HF_HUB_CACHE=$T/srv/hub bash $ROOT/lib/step.sh $ROOT/actions/hf-export.sh run" /dev/null; }
+  run on_tty 0
   [ "$status" -eq 0 ] && [[ "$output" == *"hf-export needs sudo: sudo bash $ROOT/admin/share-hf-cache.sh $T/srv/hub"* ]]
   grep -qxF "bash $ROOT/admin/share-hf-cache.sh $T/srv/hub" "$T/sudo.calls"
-  run env SUDO_RC=1 HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run
+  run on_tty 1
   [ "$status" -ne 0 ] && [[ "$output" == *"ask an admin to run: curl"*"sudo bash -s -- $T/srv/hub"* ]]
 }

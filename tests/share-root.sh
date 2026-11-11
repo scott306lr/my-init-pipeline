@@ -9,7 +9,7 @@
 #     without sudo, and a user who never ran anything can write to it;
 #   - the optional hf-export Step, named, makes that directory every user's
 #     HF_HUB_CACHE with sudo;
-#   - init.sh refuses to run as root.
+#   - init.sh refuses root on a real machine, not in a container.
 #
 #   tests/share-root.sh REPO_DIR    (as root)
 set -euo pipefail
@@ -49,14 +49,20 @@ as dave 'mkdir -p /srv/team/hub/models--y && echo d >/srv/team/hub/models--y/f'
 as carol 'echo c >>/srv/team/hub/models--y/f && mkdir /srv/team/hub/models--y/sub' || fail "another user cannot write the shared cache"
 
 # The optional hf-export Step, named (tests/runner.bats covers skipping it when
-# not chosen). dave has passwordless sudo, so it needs no terminal.
+# not chosen). dave has passwordless sudo, so it runs without a terminal.
 command -v sudo >/dev/null || { apt-get install -y -qq sudo >/dev/null 2>&1 || apt-get update -qq && apt-get install -y -qq sudo >/dev/null; }
 echo 'dave ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/dave
-# hf-export always takes the terminal: give it one (util-linux script).
-login dave "script -qec '/opt/mip/init.sh run hf-export' /dev/null" >/tmp/run.out 2>&1 \
+login dave "/opt/mip/init.sh run hf-export </dev/null" >/tmp/run.out 2>&1 \
   || { cat /tmp/run.out /home/dave/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-export run failed"; }
 grep -q 'hf-export *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-export did not run"; }
 [ "$(login carol 'echo $HF_HUB_CACHE')" = /srv/team/hub ] || fail "a new login does not get the exported HF_HUB_CACHE"
-/opt/mip/init.sh run -y >/tmp/root.out 2>&1 && fail "init.sh ran as root"
-grep -q "don't run my-init-pipeline as root" /tmp/root.out || { cat /tmp/root.out; fail "no root refusal message"; }
+# Root: refused on a real machine, allowed in a container or CI job. An unknown
+# Step name shows which: the refusal comes before the Pipeline is read.
+/opt/mip/init.sh run no-such-step >/tmp/root.out 2>&1 && fail "init.sh accepted an unknown Step"
+# shellcheck source=lib/common.sh
+if ! (. /opt/mip/lib/common.sh && root_outside_container); then
+  grep -q "unknown step" /tmp/root.out || { cat /tmp/root.out; fail "root was refused in a container"; }
+else
+  grep -q "don't run my-init-pipeline as root" /tmp/root.out || { cat /tmp/root.out; fail "root was not refused"; }
+fi
 echo "admin: ok"

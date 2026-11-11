@@ -5,8 +5,10 @@
 #          ~/.cache/huggingface, so the login token (and other per-user state)
 #          never lands on a shared or big disk. The Run asks for the directory,
 #          defaulting to the HF_HUB_CACHE already in effect (recorded here, or
-#          exported system-wide), else HF_HUB_CACHE_SUGGESTED, unless
-#          HF_HUB_CACHE_DIR is set. For a
+#          exported system-wide), else existing downloads in
+#          ~/.cache/huggingface/hub, else HF_HUB_CACHE_SUGGESTED if you can
+#          create it, else ~/.cache/huggingface/hub; unless HF_HUB_CACHE_DIR is
+#          set. For a
 #          directory outside your home that is not shared yet, it also asks
 #          whether to share it with every user of the server, unless
 #          HF_HUB_CACHE_SHARED (yes/no) answers; sharing runs
@@ -43,7 +45,7 @@ run() {
     if [ -z "$def" ] && [ -n "$legacy" ] && ! [ "$legacy" -ef "$HF_HOME_DEFAULT" ] && [ -d "$legacy/hub" ]; then
       def="$legacy/hub"
     fi
-    def="${def:-$HF_HUB_CACHE_SUGGESTED}"
+    def="${def:-$(suggestion)}"
     read -r -p "HF_HUB_CACHE directory [$def]: " dir || true   # EOF: take the default
     dir="${dir:-$def}"
     dir="${dir/#\~/$HOME}"
@@ -91,6 +93,22 @@ shared() { bash "$MIP_ROOT/admin/share-hf-cache.sh" --check "$1"; }
 # home and is not shared already.
 share_question() {
   [[ "$(realpath -m "$1")/" != "$(realpath -m "$HOME")/"* ]] && ! shared "$1"
+}
+
+# suggestion — what to offer when no HF_HUB_CACHE is in effect: downloads
+# already in HF's default location stay there; else HF_HUB_CACHE_SUGGESTED, if
+# you can create or write it; else HF's default.
+suggestion() {
+  local p="${HF_HUB_CACHE_SUGGESTED:-}"
+  if [ -d "$HF_HOME_DEFAULT/hub" ] && [ -n "$(ls -A "$HF_HOME_DEFAULT/hub")" ]; then
+    echo "$HF_HOME_DEFAULT/hub"
+    return
+  fi
+  if [ -n "$p" ]; then
+    while [ ! -e "$p" ]; do p="${p%/*}"; p="${p:-/}"; done   # nearest existing ancestor
+    if [ -d "$p" ] && [ -w "$p" ]; then echo "$HF_HUB_CACHE_SUGGESTED"; return; fi
+  fi
+  echo "$HF_HOME_DEFAULT/hub"
 }
 
 # recorded VAR — the value env.sh exports for VAR (with $HOME expanded), or nothing.
