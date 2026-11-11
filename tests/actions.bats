@@ -8,14 +8,13 @@ setup() {
   unset HF_HUB_CACHE HF_DATASETS_CACHE HF_HOME   # the developer's own Hugging Face settings
   export HF_CACHE_SUGGESTED="$T/suggested"   # never the real /shared
   export MIP_USER_CONFIG="$ROOT/config.sh"
-  mkdir -p "$HOME/.claude" "$T/repo"
-  # settings.json is a symlink into the setup repo, as claude-config leaves it.
-  ln -s "$T/repo/settings.json" "$HOME/.claude/settings.json"
 }
 
-action() { bash "$ROOT/lib/step.sh" "$ROOT/actions/$1.sh" "${@:2}"; }
-
-settings() {  # settings ABS PORTABLE — write a SessionStart list with those hooks
+# settings ABS PORTABLE — write a SessionStart list with those hooks, behind the
+# symlink into the setup repo that claude-config leaves at ~/.claude/settings.json.
+settings() {
+  mkdir -p "$HOME/.claude" "$T/repo"
+  ln -sfn "$T/repo/settings.json" "$HOME/.claude/settings.json"
   python3 - "$HOME" "$1" "$2" >"$T/repo/settings.json" <<'PY'
 import json, sys
 home, want_abs, want_portable = sys.argv[1], sys.argv[2] == "1", sys.argv[3] == "1"
@@ -54,12 +53,10 @@ session_commands() {
 
 @test "herdr: --check fails only while a machine-specific hook is present; clean file untouched" {
   settings 1 1
-  # step.sh calls a function by name only, so reach --check through a wrapper Action.
-  printf '. %q\ncheck_hooks() { portable_hooks --check; }\n' "$ROOT/actions/herdr-install.sh" >"$T/wrap.sh"
-  run bash "$ROOT/lib/step.sh" "$T/wrap.sh" check_hooks
+  run action herdr-install portable_hooks --check
   [ "$status" -eq 1 ]
   action herdr-install portable_hooks
-  run bash "$ROOT/lib/step.sh" "$T/wrap.sh" check_hooks
+  run action herdr-install portable_hooks --check
   [ "$status" -eq 0 ]
   before="$(stat -c %Y.%s "$T/repo/settings.json")"; sleep 1
   action herdr-install portable_hooks
@@ -107,25 +104,25 @@ setup_clone() {
 }
 
 @test "claude-config: clone URL follows CLAUDE_SETUP_PROTOCOL" {
-  run env CLAUDE_SETUP_PROTOCOL=https bash "$ROOT/lib/step.sh" "$ROOT/actions/claude-config.sh" clone_url
+  CLAUDE_SETUP_PROTOCOL=https run action claude-config clone_url
   [ "$output" = "https://github.com/scott306lr/my-claude-setup.git" ]
-  run env CLAUDE_SETUP_PROTOCOL=ssh CLAUDE_SETUP_REPO=me/x bash "$ROOT/lib/step.sh" "$ROOT/actions/claude-config.sh" clone_url
+  CLAUDE_SETUP_PROTOCOL=ssh CLAUDE_SETUP_REPO=me/x run action claude-config clone_url
   [ "$output" = "git@github.com:me/x.git" ]
-  run env CLAUDE_SETUP_PROTOCOL=ftp bash "$ROOT/lib/step.sh" "$ROOT/actions/claude-config.sh" clone_url
+  CLAUDE_SETUP_PROTOCOL=ftp run action claude-config clone_url
   [ "$status" -ne 0 ]
   [[ "$output" == *"must be https or ssh"* ]]
 }
 
 @test "delta: sets git's pager only when none is configured" {
-  mkdir -p "$T/bin"; printf '#!/bin/sh\necho delta 0.0\n' >"$T/bin/delta"; chmod +x "$T/bin/delta"
-  PATH="$T/bin:$PATH" action delta-install run
+  fake_tool delta 'echo delta 0.0'
+  action delta-install run
   [ "$(git config --global --get core.pager)" = delta ]
   [ "$(git config --global --get interactive.diffFilter)" = "delta --color-only" ]
 
   git config --global core.pager less
-  PATH="$T/bin:$PATH" action delta-install run
+  action delta-install run
   [ "$(git config --global --get core.pager)" = less ]
-  PATH="$T/bin:$PATH" action delta-install check
+  action delta-install check
 }
 
 @test "git-identity: sets only the unset half of the identity, keeps a hand-set one" {
@@ -141,7 +138,7 @@ setup_clone() {
 @test "git-identity: an empty setting fails loudly instead of writing nothing" {
   # An empty environment override falls back to config.sh's default, so blank it there.
   printf 'GIT_USER_NAME=Some\nGIT_USER_EMAIL=\n' >"$T/config.sh"
-  run env MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/git-identity.sh" run
+  MIP_USER_CONFIG="$T/config.sh" run action git-identity run
   [ "$status" -ne 0 ]
   [[ "$output" == *"GIT_USER_EMAIL"* ]]
   [ "$(git config --global --get user.name)" = Some ]
@@ -150,7 +147,6 @@ setup_clone() {
 
 ENV_SH='$HOME/.config/my-init-pipeline/env.sh'
 envf() { printf '%s\n' "$HOME/.config/my-init-pipeline/env.sh"; }
-hfc() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" "$1"; }
 
 # exports ROOT — env.sh points HF_HUB_CACHE and HF_DATASETS_CACHE into ROOT (as written there).
 exports() {
@@ -169,7 +165,7 @@ exports() {
   run bash -c ". $ENV_SH; echo \"\$HF_HUB_CACHE \$HF_DATASETS_CACHE\""
   [ "$output" = "$HOME/hf/hub $HOME/hf/datasets" ]
 
-  run env HF_CACHE_DIR="$T/srv" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" check
+  HF_CACHE_DIR="$T/srv" HF_CACHE_SHARED=no run action hf-cache check
   [ "$status" -eq 1 ]
   HF_CACHE_DIR="$T/srv" HF_CACHE_SHARED=no action hf-cache run </dev/null
   [ "$(grep -c '^export HF_HUB_CACHE=' "$(envf)")" -eq 1 ] && [ "$(grep -c '^export HF_DATASETS_CACHE=' "$(envf)")" -eq 1 ]
@@ -180,30 +176,30 @@ exports() {
 @test "hf-cache: HF_CACHE_DIR empty — prompts; Enter keeps the recorded folder; ~ expands; relative is refused" {
   printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
   export MIP_USER_CONFIG="$T/config.sh"
-  run hfc check
+  run action hf-cache check
   [ "$status" -eq 1 ]                        # not na: a human can answer it
-  run hfc run </dev/null                     # no terminal and nothing recorded: the suggestion applies
+  run action hf-cache run </dev/null                     # no terminal and nothing recorded: the suggestion applies
   [ "$status" -eq 0 ]
   exports "$T/suggested"
-  printf '%s/\n' "$T/picked" | hfc run
+  printf '%s/\n' "$T/picked" | action hf-cache run
   exports "$T/picked"
-  printf '\n' | hfc run
+  printf '\n' | action hf-cache run
   exports "$T/picked"
-  printf '~/hfx\n' | hfc run
+  printf '~/hfx\n' | action hf-cache run
   exports '$HOME/hfx'
   run bash -c "printf 'rel/hf\n' | bash '$ROOT/lib/step.sh' '$ROOT/actions/hf-cache.sh' run"
   [ "$status" -ne 0 ]
   [[ "$output" == *"absolute path"* ]]
-  hfc check
+  action hf-cache check
 }
 
 @test "hf-cache: needs no human once its settings answer every question; the prompt defaults to a system-wide cache folder" {
-  run env HF_CACHE_DIR=/x HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" interactive
+  HF_CACHE_DIR=/x HF_CACHE_SHARED=no run action hf-cache interactive
   [ "$status" -eq 1 ]
   printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
   export MIP_USER_CONFIG="$T/config.sh"
-  hfc interactive
-  HF_HUB_CACHE="$T/sys/hub" hfc run </dev/null
+  action hf-cache interactive
+  HF_HUB_CACHE="$T/sys/hub" action hf-cache run </dev/null
   exports "$T/sys"
 }
 
@@ -211,9 +207,9 @@ exports() {
   mkdir -p "$T/old/hub/models--x" "$HOME/.config/my-init-pipeline"
   printf 'export HF_HUB_CACHE="%s/hub"\n' "$T/old" >"$(envf)"
   printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
-  run hfc check
+  run action hf-cache check
   [ "$status" -eq 1 ]                        # no HF_DATASETS_CACHE yet
-  MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  MIP_USER_CONFIG="$T/config.sh" action hf-cache run </dev/null
   exports "$T/old"
   [ -d "$T/old/hub/models--x" ] && [ -d "$T/old/datasets" ]
 }
@@ -224,7 +220,7 @@ exports() {
   echo weights >"$h/hub/blobs/12/1234"
   ln -s ../../../blobs/12/1234 "$h/hub/models--x/snapshots/abc/model.safetensors"
   echo arrow >"$h/datasets/ds___y/0.0.0/data.arrow"
-  run env HF_CACHE_DIR="$T/new" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  HF_CACHE_DIR="$T/new" HF_CACHE_SHARED=no run action hf-cache run </dev/null
   [ "$status" -eq 0 ] && [[ "$output" == *"moving $h/hub into $T/new/hub"* ]]
   [ "$(cat "$T/new/hub/models--x/snapshots/abc/model.safetensors")" = weights ]
   [ "$(cat "$T/new/datasets/ds___y/0.0.0/data.arrow")" = arrow ]
@@ -237,7 +233,7 @@ exports() {
   printf 'export HF_HUB_CACHE="%s/hub"\nexport HF_DATASETS_CACHE="%s/datasets"\n' "$T/a" "$T/a" >"$(envf)"
   echo old >"$T/a/hub/models--x/refs/main"; echo new >"$T/b/hub/models--x/refs/main"
   touch "$T/a/hub/models--x/refs/pr-1" "$T/b/hub/models--x/refs/pr-2"
-  run env HF_CACHE_DIR="$T/b" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  HF_CACHE_DIR="$T/b" HF_CACHE_SHARED=no run action hf-cache run </dev/null
   [ "$status" -eq 0 ] && [[ "$output" == *"1 entries were already in $T/b/hub"* ]]
   [ "$(cat "$T/b/hub/models--x/refs/main")" = new ] && [ "$(cat "$T/a/hub/models--x/refs/main")" = old ]
   [ -e "$T/b/hub/models--x/refs/pr-1" ] && [ -e "$T/b/hub/models--x/refs/pr-2" ]
@@ -247,7 +243,7 @@ exports() {
 @test "hf-cache: an unwritable target fails before the exports change" {
   HF_CACHE_DIR="$T/a" HF_CACHE_SHARED=no action hf-cache run </dev/null
   mkdir -p "$T/ro"; chmod 555 "$T/ro"
-  run env HF_CACHE_DIR="$T/ro/hf" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  HF_CACHE_DIR="$T/ro/hf" HF_CACHE_SHARED=no run action hf-cache run </dev/null
   chmod 755 "$T/ro"
   [ "$status" -ne 0 ] && [[ "$output" == *"cannot create or write"* ]]
   exports "$T/a"
@@ -259,7 +255,7 @@ exports() {
   printf tok >"$T/shared/token"; touch "$T/shared/stored_tokens"
   ln -s "$T/shared" "$HOME/.cache/huggingface"
   printf 'export HF_HOME="%s"\n' "$T/shared" >"$(envf)"
-  run env HF_CACHE_DIR="$T/shared" HF_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" check
+  HF_CACHE_DIR="$T/shared" HF_CACHE_SHARED=no run action hf-cache check
   [ "$status" -eq 1 ]
   HF_CACHE_DIR="$T/shared" HF_CACHE_SHARED=no action hf-cache run </dev/null
   [ -d "$HOME/.cache/huggingface" ] && [ ! -L "$HOME/.cache/huggingface" ]
@@ -275,7 +271,7 @@ exports() {
   printf old >"$T/old/token"; printf new >"$HOME/.cache/huggingface/token"
   printf 'export HF_HOME="%s"\n' "$T/old" >"$(envf)"
   printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
-  run env MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  MIP_USER_CONFIG="$T/config.sh" run action hf-cache run </dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"left $T/old/token"* ]]
   [ "$(cat "$HOME/.cache/huggingface/token")" = new ] && [ "$(cat "$T/old/token")" = old ]
@@ -287,21 +283,21 @@ exports() {
   printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
   export MIP_USER_CONFIG="$T/config.sh"
   mkdir -p "$T/ro"; chmod 555 "$T/ro"
-  HF_CACHE_SUGGESTED="$T/ro/shared" hfc run </dev/null     # not creatable: HF's default
+  HF_CACHE_SUGGESTED="$T/ro/shared" action hf-cache run </dev/null     # not creatable: HF's default
   chmod 755 "$T/ro"
   exports '$HOME/.cache/huggingface'
   rm "$(envf)"
-  hfc run </dev/null
+  action hf-cache run </dev/null
   exports "$T/suggested"
   rm "$(envf)"
-  run env HF_CACHE_SUGGESTED= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  HF_CACHE_SUGGESTED= run action hf-cache run </dev/null
   [ "$status" -eq 0 ]                        # an empty setting falls back too
 }
 
 @test "hf-cache: Note tells a shell that still has HF_HOME to drop it" {
-  run env HF_HOME=/x bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" note
+  HF_HOME=/x run action hf-cache note
   [[ "$output" == *"unset HF_HOME"* ]]
-  run env -u HF_HOME bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" note
+  run action hf-cache note
   [ -z "$output" ]
 }
 
@@ -310,9 +306,8 @@ exports() {
 # only for those. Like the real uv, it rejects --managed-python while
 # UV_PYTHON_PREFERENCE is set.
 fake_uv() {
-  mkdir -p "$T/bin" "$T/py"
-  cat >"$T/bin/uv" <<'SH'
-#!/bin/bash
+  mkdir -p "$T/py"
+  fake_tool uv <<'SH'
 echo "uv $*" >>"$T/events"
 if [ -n "$UV_PYTHON_PREFERENCE" ] && [[ " $* " == *" --managed-python "* ]]; then exit 2; fi
 case "$1 $2" in
@@ -321,17 +316,16 @@ case "$1 $2" in
   *) exit 1 ;;
 esac
 SH
-  chmod +x "$T/bin/uv"
 }
 
 @test "python: installs every configured version and exports UV_PYTHON_PREFERENCE=only-managed" {
   fake_uv
-  run env PATH="$T/bin:$PATH" bash "$ROOT/lib/step.sh" "$ROOT/actions/python-install.sh" check
+  run action python-install check
   [ "$status" -eq 1 ]
-  PATH="$T/bin:$PATH" action python-install run
+  action python-install run
   grep -qxF 'uv python install 3.10 3.12' "$T/events"
   grep -qxF 'export UV_PYTHON_PREFERENCE="only-managed"' "$HOME/.config/my-init-pipeline/env.sh"
-  PATH="$T/bin:$PATH" action python-install check
+  action python-install check
   run bash -c ". $ENV_SH; echo \"\$UV_PYTHON_PREFERENCE\""
   [ "$output" = only-managed ]
 }
@@ -339,19 +333,19 @@ SH
 @test "python: the Check fails while a version or the export is missing; an empty setting fails loudly" {
   fake_uv
   touch "$T/py/3.10" "$T/py/3.12"
-  run env PATH="$T/bin:$PATH" bash "$ROOT/lib/step.sh" "$ROOT/actions/python-install.sh" check
+  run action python-install check
   [ "$status" -eq 1 ]                        # installed, but uv would still pick a system Python
-  PATH="$T/bin:$PATH" action python-install run
-  PATH="$T/bin:$PATH" action python-install check
-  run env PATH="$T/bin:$PATH" MANAGED_PYTHON_VERSIONS="3.12 3.13" bash "$ROOT/lib/step.sh" "$ROOT/actions/python-install.sh" check
+  action python-install run
+  action python-install check
+  MANAGED_PYTHON_VERSIONS="3.12 3.13" run action python-install check
   [ "$status" -eq 1 ]
-  PATH="$T/bin:$PATH" MANAGED_PYTHON_VERSIONS="3.12 3.13" action python-install run
+  MANAGED_PYTHON_VERSIONS="3.12 3.13" action python-install run
   grep -qxF 'uv python install 3.12 3.13' "$T/events"
-  PATH="$T/bin:$PATH" MANAGED_PYTHON_VERSIONS="3.12 3.13" action python-install check
+  MANAGED_PYTHON_VERSIONS="3.12 3.13" action python-install check
   [ "$(grep -c '^export UV_PYTHON_PREFERENCE=' "$HOME/.config/my-init-pipeline/env.sh")" -eq 1 ]
 
   printf 'MANAGED_PYTHON_VERSIONS=\n' >"$T/config.sh"
-  run env PATH="$T/bin:$PATH" MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/python-install.sh" run
+  MIP_USER_CONFIG="$T/config.sh" run action python-install run
   [ "$status" -ne 0 ]
   [[ "$output" == *"MANAGED_PYTHON_VERSIONS"* ]]
 }
@@ -359,11 +353,9 @@ SH
 # fake_uv_bin — a uv on PATH that logs its arguments and UV_NO_MODIFY_PATH, and
 # an installer (file:// URL) that writes a receipt, as the real one does.
 fake_uv_bin() {
-  mkdir -p "$T/bin"
-  printf '#!/bin/sh\necho "uv $* nomod=$UV_NO_MODIFY_PATH" >>"%s/uv.calls"\n' "$T" >"$T/bin/uv"
-  chmod +x "$T/bin/uv"
+  fake_tool uv 'echo "uv $* nomod=$UV_NO_MODIFY_PATH" >>"$T/uv.calls"'
   printf '#!/bin/sh\necho "installer nomod=$UV_NO_MODIFY_PATH" >>"%s/uv.calls"\nmkdir -p "$HOME/.config/uv" && echo {} >"$HOME/.config/uv/uv-receipt.json"\n' "$T" >"$T/uv-install.sh"
-  export PATH="$T/bin:$PATH" MIP_UV_INSTALLER_URL="file://$T/uv-install.sh"
+  export MIP_UV_INSTALLER_URL="file://$T/uv-install.sh"
 }
 
 @test "uv: upgrade self-updates a standalone install, without touching shell profiles" {
@@ -384,6 +376,9 @@ fake_uv_bin() {
 }
 
 
+# fake_sudo — a sudo that records its arguments in $T/sudo.calls and exits SUDO_RC.
+fake_sudo() { fake_tool sudo 'echo "$*" >>"$T/sudo.calls"; exit "${SUDO_RC:-0}"'; }
+
 # Sharing (no root needed: you own the folder).
 share_cfg() { printf 'HF_CACHE_DIR=%s\nHF_CACHE_SHARED=%s\n' "$1" "$2" >"$T/config.sh"; export MIP_USER_CONFIG="$T/config.sh"; }
 shared_dir() { [ "$(hf_state "$1" shared)" = acl ]; }
@@ -391,15 +386,15 @@ shared_dir() { [ "$(hf_state "$1" shared)" = acl ]; }
 @test "hf-cache: HF_CACHE_SHARED=yes shares a folder outside home (hub/ and datasets/) with everyone; the Check requires it" {
   command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
   share_cfg "$T/srv" yes
-  run hfc interactive
+  run action hf-cache interactive
   [ "$status" -eq 1 ]                        # both answered: no human needed
-  hfc run </dev/null
+  action hf-cache run </dev/null
   shared_dir "$T/srv" && shared_dir "$T/srv/hub" && shared_dir "$T/srv/datasets"
-  hfc check
-  run hfc note                               # not exported system-wide here: say how
+  action hf-cache check
+  run action hf-cache note                               # not exported system-wide here: say how
   [[ "$output" == *"./init.sh run hf-export"* ]]
   setfacl -b "$T/srv"; chmod 755 "$T/srv"
-  run hfc check
+  run action hf-cache check
   [ "$status" -eq 1 ]
 }
 
@@ -408,12 +403,12 @@ shared_dir() { [ "$(hf_state "$1" shared)" = acl ]; }
   mkdir -p "$HOME/.cache/huggingface/hub/models--x/refs"
   echo abc >"$HOME/.cache/huggingface/hub/models--x/refs/main"; chmod 600 "$HOME/.cache/huggingface/hub/models--x/refs/main"
   share_cfg "$T/srv" yes
-  hfc run </dev/null
+  action hf-cache run </dev/null
   shared_dir "$T/srv/hub/models--x/refs"
   getfacl -p "$T/srv/hub/models--x/refs/main" | grep -qx 'other::rw-'
   # Back to a private folder: the shared one keeps everything.
   share_cfg "$HOME/mine" no
-  run hfc run </dev/null
+  run action hf-cache run </dev/null
   [[ "$output" == *"is shared with other users, so its downloads stay there"* ]]
   [ -e "$T/srv/hub/models--x/refs/main" ]
 }
@@ -421,67 +416,62 @@ shared_dir() { [ "$(hf_state "$1" shared)" = acl ]; }
 @test "hf-cache: asks whether to share only outside home and only if not shared; n keeps it private" {
   command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
   share_cfg "$T/srv" ""
-  hfc interactive                            # the question is open
-  printf 'n\n' | hfc run
+  action hf-cache interactive                            # the question is open
+  printf 'n\n' | action hf-cache run
   ! shared_dir "$T/srv"
-  hfc check                                  # unset setting: private is fine
-  printf '\n' | hfc run                     # Enter: yes
+  action hf-cache check                                  # unset setting: private is fine
+  printf '\n' | action hf-cache run                     # Enter: yes
   shared_dir "$T/srv"
-  run hfc interactive                        # shared now: nothing to ask
+  run action hf-cache interactive                        # shared now: nothing to ask
   [ "$status" -eq 1 ]
   share_cfg "$HOME/hf" ""
-  run hfc interactive                        # inside home: never asked
+  run action hf-cache interactive                        # inside home: never asked
   [ "$status" -eq 1 ]
 }
 
 @test "hf-export: chooses its folder itself — HF_CACHE_DIR, else the one in effect, else the suggestion; n/a in your home" {
-  hfe() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" "$@"; }
-  run hfe check
+  run action hf-export check
   [ "$status" -eq 1 ]                        # fresh server: the suggestion, offered before hf-cache ran
   printf 'HF_CACHE_SUGGESTED=\n' >"$T/config.sh"   # blanked in config (an empty env value means the default)
-  run env MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  MIP_USER_CONFIG="$T/config.sh" run action hf-export check
   [ "$status" -eq 2 ]                        # no folder at all
-  run env HF_CACHE_DIR="$HOME/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  HF_CACHE_DIR="$HOME/hf" run action hf-export check
   [ "$status" -eq 2 ]                        # a cache in your home is yours alone
-  run env HF_HUB_CACHE="$HOME/hf/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  HF_HUB_CACHE="$HOME/hf/hub" run action hf-export check
   [ "$status" -eq 2 ]                        # an older hub-only export counts as in effect
-  run env HF_CACHE_DIR="$HOME/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  HF_CACHE_DIR="$HOME/hf" run action hf-export run </dev/null
   [ "$status" -ne 0 ] && [[ "$output" == *"is in your home"* ]]
   export_for_everyone "$T/sys"               # what root's earlier run exported
   [ "$(bash "$ROOT/admin/share-hf-cache.sh" --exported-folder)" = "$T/sys" ]
   mkdir -p "$T/sys"
-  run hfe check
+  run action hf-export check
   [ "$status" -eq 1 ]                        # exported, but not shared yet
 }
 
 @test "hf-cache: the prompt defaults to the folder exported for every user, read fresh (as hf-export just left it)" {
   export_for_everyone "$T/sys"
   printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
-  MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  MIP_USER_CONFIG="$T/config.sh" action hf-cache run </dev/null
   exports "$T/sys"
 }
 
 @test "hf-export: a terminal only when sudo needs a password; without one it never lets sudo prompt" {
-  mkdir -p "$T/bin"
-  printf '#!/bin/sh\necho "$*" >>"%s/sudo.calls"\nexit "${SUDO_RC:-0}"\n' "$T" >"$T/bin/sudo"; chmod +x "$T/bin/sudo"
-  export PATH="$T/bin:$PATH"
-  run env SUDO_RC=0 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" interactive
+  fake_sudo
+  SUDO_RC=0 run action hf-export interactive
   [ "$status" -eq 1 ]
-  SUDO_RC=1 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" interactive
+  SUDO_RC=1 action hf-export interactive
   : >"$T/sudo.calls"
   export HF_HUB_CACHE="$T/srv/hub" HF_DATASETS_CACHE="$T/srv/datasets"
-  run env SUDO_RC=0 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  SUDO_RC=0 run action hf-export run </dev/null
   [ "$status" -eq 0 ]
   grep -qxF -- "-n bash $ROOT/admin/share-hf-cache.sh $T/srv" "$T/sudo.calls"
-  run env SUDO_RC=1 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  SUDO_RC=1 run action hf-export run </dev/null
   [ "$status" -ne 0 ] && [[ "$output" == *"run it on a terminal: ./init.sh run hf-export"* ]]
 }
 
 @test "hf-export: on a terminal, run prints the sudo command, or what to ask an admin" {
   command -v script >/dev/null || skip "util-linux script not available"
-  mkdir -p "$T/bin"
-  printf '#!/bin/sh\necho "$*" >>"%s/sudo.calls"\nexit "${SUDO_RC:-0}"\n' "$T" >"$T/bin/sudo"; chmod +x "$T/bin/sudo"
-  export PATH="$T/bin:$PATH"
+  fake_sudo
   on_tty() { script -qec "env SUDO_RC=$1 HF_CACHE_DIR=$T/srv bash $ROOT/lib/step.sh $ROOT/actions/hf-export.sh run" /dev/null; }
   run on_tty 0
   [ "$status" -eq 0 ] && [[ "$output" == *"hf-export needs sudo: sudo bash $ROOT/admin/share-hf-cache.sh $T/srv"* ]]
@@ -491,16 +481,14 @@ shared_dir() { [ "$(hf_state "$1" shared)" = acl ]; }
 }
 
 @test "codex: the Check needs codex's config directory; run creates it private without reinstalling" {
-  mkdir -p "$T/bin"
-  printf '#!/bin/sh\necho "codex-cli 9.9"\n' >"$T/bin/codex"; chmod +x "$T/bin/codex"
-  export PATH="$T/bin:$PATH"
+  fake_tool codex 'echo "codex-cli 9.9"'
   run action codex-install check
   [ "$status" -eq 1 ]                        # on PATH, but no ~/.codex yet (herdr needs it)
   action codex-install run                   # codex is there: no installer download
   [ "$(stat -c %a "$HOME/.codex")" = 700 ]
   action codex-install check
   mkdir -p "$T/codex-home"
-  run env CODEX_HOME="$T/codex-home" bash "$ROOT/lib/step.sh" "$ROOT/actions/codex-install.sh" check
+  CODEX_HOME="$T/codex-home" run action codex-install check
   [ "$status" -eq 0 ]                        # CODEX_HOME is honoured
 }
 
@@ -518,9 +506,9 @@ shared_dir() { [ "$(hf_state "$1" shared)" = acl ]; }
 @test "hf-cache and hf-export: / is refused as the cache folder, the same way by both" {
   run bash -c "printf '/\n' | bash '$ROOT/lib/step.sh' '$ROOT/actions/hf-cache.sh' run"
   [ "$status" -ne 0 ] && [[ "$output" == *"absolute path other than /"* ]]
-  run env HF_CACHE_DIR=/ bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  HF_CACHE_DIR=/ run action hf-cache run </dev/null
   [ "$status" -ne 0 ] && [[ "$output" == *"absolute path other than /"* ]]
-  run env HF_CACHE_DIR=/ bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  HF_CACHE_DIR=/ run action hf-export run </dev/null
   [ "$status" -ne 0 ] && [[ "$output" == *"absolute path other than /"* ]]
 }
 
@@ -528,13 +516,13 @@ shared_dir() { [ "$(hf_state "$1" shared)" = acl ]; }
   HF_CACHE_DIR="$HOME/hf/" HF_CACHE_SHARED=no action hf-cache run </dev/null
   HF_CACHE_DIR="$HOME/hf/" HF_CACHE_SHARED=no action hf-cache check
   HF_CACHE_DIR='~/hf' HF_CACHE_SHARED=no action hf-cache check
-  run env HF_CACHE_DIR='~/hf/' bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  HF_CACHE_DIR='~/hf/' run action hf-export check
   [ "$status" -eq 2 ]                        # in your home, however it is spelled
 }
 
 @test "hf-cache: a group-shared folder you own counts as shared — nothing to ask, no ACL added" {
   mkdir -p "$T/gown"; chmod 2775 "$T/gown"
-  run env HF_CACHE_DIR="$T/gown" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" interactive
+  HF_CACHE_DIR="$T/gown" run action hf-cache interactive
   [ "$status" -eq 1 ]
   HF_CACHE_DIR="$T/gown" action hf-cache run </dev/null
   exports "$T/gown"

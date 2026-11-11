@@ -1,5 +1,5 @@
 # Pipeline model and scheduler. Sourced by init.sh; expects MIP_ROOT, MIP_CONF
-# and MIP_ACTIONS_DIR to be set and lib/common.sh to be loaded.
+# and MIP_ACTIONS_DIR to be set and lib/common.sh and lib/action.sh to be loaded.
 
 # Step results: word -> "MARK KIND". KIND says what the result means for the
 # Run: ok (it worked), skip (nothing to do), fail (the Run fails), left (not
@@ -112,52 +112,7 @@ required_by() {
   printf '%s\n' "${out[*]}"
 }
 
-# ── action headers ────────────────────────────────────────────────────────────
-
-# action_header STEP — the leading comment block of the Step's Action file.
-action_header() {
-  awk 'NR==1 && /^#!/ {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$(action_file "$1")"
-}
-
-# action_field STEP FIELD — value of "# FIELD: value" in the header, if any.
-action_field() {
-  action_header "$1" | sed -n "s/^$2:[[:space:]]*//p" | head -n 1
-}
-
-# is_optional STEP — true if the header says `optional: yes`: offered, never run
-# unless chosen.
-is_optional() { [ "$(action_field "$1" optional)" = yes ]; }
-
-# is_interactive STEP — true if the Step needs a human now: its header says
-# `interactive: yes` and its interactive() function, if it defines one, agrees.
-# An Action defines interactive() when a setting can answer its prompt, so a
-# Run without a terminal still runs it once that setting is given.
-is_interactive() {
-  [ "$(action_field "$1" interactive)" = yes ] || return 1
-  local rc=0
-  step_call "$1" interactive >/dev/null 2>&1 || rc=$?
-  [ "$rc" = 0 ] || [ "$rc" = 3 ]   # 3: no interactive() defined
-}
-
 # ── execution ─────────────────────────────────────────────────────────────────
-
-# step_call STEP FUNCTION [ARG...] — run one function of the Step's Action.
-step_call() { bash "$MIP_ROOT/lib/step.sh" "$(action_file "$1")" "${@:2}"; }
-
-# action_defines STEP FUNCTION — true if the Step's Action defines FUNCTION.
-action_defines() {
-  (
-    # shellcheck disable=SC1090
-    . "${MIP_USER_CONFIG:-$MIP_ROOT/config.sh}" && . "$(action_file "$1")" && declare -F "$2"
-  ) >/dev/null 2>&1
-}
-
-# check_status STEP — prints done | na | todo (Checks must have no side effects).
-check_status() {
-  local rc=0
-  step_call "$1" check >/dev/null 2>&1 || rc=$?
-  case "$rc" in 0) echo "done" ;; 2) echo na ;; *) echo todo ;; esac
-}
 
 # step_execute STEP MODE — the body of one Step. Prints its result word last.
 # MODE: install (run unless the Check passes), force (run regardless), or
@@ -172,15 +127,10 @@ step_execute() {
     if [ "$rc" = 2 ]; then echo "RESULT na"; return; fi
     if [ "$rc" != 0 ] && [ -n "${UNCHOSEN[$step]:-}" ]; then echo "RESULT optional"; return; fi
     if [ "$rc" = 0 ]; then
-      if [ "$mode" = upgrade ]; then
+      if [ "$mode" = upgrade ] && action_defines "$step" upgrade; then
         echo "-- upgrade"
         echo upgrading >"$RUN_DIR/$step.started"
-        rc=0; step_call "$step" upgrade || rc=$?
-        case "$rc" in
-          0) echo "RESULT upgraded" ;;
-          3) echo "RESULT done" ;;   # Action has no upgrade()
-          *) echo "RESULT failed" ;;
-        esac
+        if step_call "$step" upgrade; then echo "RESULT upgraded"; else echo "RESULT failed"; fi
       else
         echo "RESULT done"
       fi

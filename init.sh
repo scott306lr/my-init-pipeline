@@ -36,6 +36,8 @@ export MIP_ROOT MIP_CONF MIP_ACTIONS_DIR
 . "$MIP_ROOT/lib/common.sh"
 # shellcheck source=lib/pipeline.sh
 . "$MIP_ROOT/lib/pipeline.sh"
+# shellcheck source=lib/action.sh
+. "$MIP_ROOT/lib/action.sh"
 # shellcheck source=lib/checklist.sh
 . "$MIP_ROOT/lib/checklist.sh"
 

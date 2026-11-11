@@ -64,6 +64,22 @@ fake_action() {
   } >"$MIP_ACTIONS_DIR/$name.sh"
 }
 
+# action NAME FUNCTION [ARG...] — one function of the real Action NAME, the way
+# the runner calls it. Settings go in front: HF_CACHE_DIR=/x run action hf-cache check
+action() { bash "$ROOT/lib/step.sh" "$ROOT/actions/$1.sh" "${@:2}"; }
+
+# fake_tool NAME [BODY] — a Tool NAME on PATH that runs BODY (bash), or what
+# stdin holds when BODY is not given. BODY sees $T.
+fake_tool() {
+  mkdir -p "$T/bin"
+  {
+    echo '#!/usr/bin/env bash'
+    if [ $# -ge 2 ]; then printf '%s\n' "$2"; else cat; fi
+  } >"$T/bin/$1"
+  chmod +x "$T/bin/$1"
+  case ":$PATH:" in *":$T/bin:"*) ;; *) export PATH="$T/bin:$PATH" ;; esac
+}
+
 mip() { "$ROOT/init.sh" "$@"; }
 
 # mip_tty ARGS... — init.sh run on a pseudo-terminal (util-linux script).

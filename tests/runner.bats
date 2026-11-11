@@ -2,6 +2,7 @@
 # Runner behaviour against fake Actions: ordering, parallelism, skip/force,
 # failure handling, interactive Steps, validation, list/describe.
 
+bats_require_minimum_version 1.5.0   # run -N
 load helpers
 
 setup() { setup_pipeline; }
@@ -222,6 +223,23 @@ setup() { setup_pipeline; }
   finished="$(grep -n '✓ a ' <<<"$output" | cut -d: -f1)"
   [ -n "$started" ] && [ "$started" -lt "$finished" ]
   [[ "$output" != *"▶ b "* ]]
+}
+
+@test "an upgrade() that fails with status 3 fails the Step; it is not read as 'no upgrade()'" {
+  step a
+  printf '%s\n' '# summary: a' 'check() { :; }' 'run() { :; }' 'upgrade() { return 3; }' >"$MIP_ACTIONS_DIR/a.sh"
+  run mip run --upgrade --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"a "*"failed"* ]]
+}
+
+@test "lib/step.sh: a function the Action lacks is status 127; --defines says whether it has one" {
+  fake_action a --upgrade
+  run -127 bash "$ROOT/lib/step.sh" "$MIP_ACTIONS_DIR/a.sh" note
+  [[ "$output" == *"defines no note()"* ]]
+  bash "$ROOT/lib/step.sh" "$MIP_ACTIONS_DIR/a.sh" --defines upgrade
+  run bash "$ROOT/lib/step.sh" "$MIP_ACTIONS_DIR/a.sh" --defines note
+  [ "$status" -eq 1 ]
 }
 
 @test "--upgrade announces upgrading" {
