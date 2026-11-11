@@ -72,7 +72,11 @@ login erin "HF_CACHE_DIR=/srv/grp/hf /opt/mip/init.sh run hf-cache </dev/null" >
   || { cat /tmp/run.out /home/erin/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-cache failed on a group-shared folder"; }
 grep -q 'hf-cache *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-cache did not run on a group-shared folder"; }
 [ "$(stat -c %G /srv/grp/hf/datasets/ds___g/f)" = team ] || fail "moved download did not join the folder's group"
-as carol 'echo c >>/srv/grp/hf/datasets/ds___g/f' || fail "another member cannot update a moved download"
+as carol 'echo c >>/srv/grp/hf/datasets/ds___g/f' || {
+  ls -la /srv/grp/hf/datasets /srv/grp/hf/datasets/ds___g; getfacl -p /srv/grp/hf/datasets/ds___g; id carol; su - carol -c id
+  cat /home/erin/.local/state/my-init-pipeline/runs/latest/hf-cache.log
+  fail "another member cannot update a moved download"
+}
 getfacl -p /srv/grp/hf | grep -q '^default:' && fail "a folder someone else owns got an ACL"
 # Leaving it again: other members' downloads stay.
 as carol 'mkdir -p /srv/grp/hf/hub/models--c && echo c >/srv/grp/hf/hub/models--c/f'
