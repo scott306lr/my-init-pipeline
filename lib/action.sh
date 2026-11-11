@@ -39,9 +39,14 @@ is_interactive() {
   step_call "$1" interactive >/dev/null 2>&1
 }
 
-# check_status STEP — prints done | na | todo (Checks must have no side effects).
+# check_word STATUS — what a check() status means: done (0), na (2: it does not
+# apply here), todo (anything else).
+check_word() { case "$1" in 0) echo "done" ;; 2) echo na ;; *) echo todo ;; esac; }
+
+# check_status STEP — the Step's Check now: done | na | todo, its output
+# dropped (Checks must have no side effects).
 check_status() {
   local rc=0
   step_call "$1" check >/dev/null 2>&1 || rc=$?
-  case "$rc" in 0) echo "done" ;; 2) echo na ;; *) echo todo ;; esac
+  check_word "$rc"
 }

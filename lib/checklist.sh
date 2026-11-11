@@ -28,18 +28,20 @@ gum_bin() {
   printf '%s\n' "$dir/gum"
 }
 
-# checklist — show every Step with its summary and Check result; print the
-# ticked Step names. Steps with work to do start ticked, except optional ones
+# checklist — show every Step with its summary and Check result; print each
+# ticked Step as "NAME CHECK", its Check result as shown (done | na | todo). Steps with work to do start ticked, except optional ones
 # (marked "opt"), so Enter runs what a Run without the checklist would; ticking an
 # optional Step runs it, ticking a done Step upgrades it. Exit status: 130 when cancelled, other non-zero
 # when no checklist could be shown.
 checklist() {
-  local gum s st mark label
+  local gum s st mark label picked
   local -a opts=() ticked=()
+  local -A status=()
   gum="$(gum_bin)" || return 1
   printf 'Checking %d Steps...\n' "${#STEPS[@]}" >&2
   for s in "${STEPS[@]}"; do
     st="$(check_status "$s")"
+    status[$s]="$st"
     case "$st" in done | na) mark="$st" ;; *) mark="" ;; esac
     if [ "$st" = todo ] && is_optional "$s"; then mark=opt; fi
     # gum splits --selected on commas, so labels carry none.
@@ -47,8 +49,11 @@ checklist() {
     opts+=("$label"$'\t'"$s")
     if [ "$st" = todo ] && [ "$mark" != opt ]; then ticked+=("$label"); fi
   done
-  "$gum" choose --no-limit --no-show-help --label-delimiter $'\t' --height "$((${#STEPS[@]} + 1))" \
+  picked="$("$gum" choose --no-limit --no-show-help --label-delimiter $'\t' --height "$((${#STEPS[@]} + 1))" \
     --header "$(printf '%s\n' "Steps to run: ticked ones install; 'opt' = optional, off unless ticked; a ticked 'done' Step is upgraded" \
       "space: tick/untick   a: all   enter: run   ctrl+c: cancel")" \
-    --selected "$(IFS=,; printf '%s' "${ticked[*]}")" "${opts[@]}"
+    --selected "$(IFS=,; printf '%s' "${ticked[*]}")" "${opts[@]}")" || return
+  while read -r s; do
+    if [ -n "$s" ]; then printf '%s %s\n' "$s" "${status[$s]:-todo}"; fi
+  done <<<"$picked"
 }

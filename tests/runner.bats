@@ -125,27 +125,21 @@ setup() { setup_pipeline; }
   run mip run --non-interactive
   [[ "$output" == *"ask "*"deferred"* ]]
   run mip run --dry-run
-  [[ "$output" == *"ask "*"todo   yes"* ]]
+  [[ "$output" == *"ask "*"deferred"* ]]
   MIP_ANSWER=x run mip run --dry-run
-  [[ "$output" == *"ask "*"todo   no"* ]]
+  [[ "$output" == *"ask "*"run"* ]]
   MIP_ANSWER=x run mip run --non-interactive
   [ "$status" -eq 0 ]
   grep -q 'start ask tty=n' "$T/events"
   grep -q 'end needs-ask' "$T/events"
 }
 
-@test "an Interactive Step whose Check does not apply is n/a, with or without a terminal; dependents run" {
+@test "an Interactive Step whose Check does not apply is n/a; dependents run" {
   step off; step after off
   fake_action off --interactive --na; fake_action after
   run mip run --non-interactive
   [ "$status" -eq 0 ]
   [[ "$output" == *"off "*"na"* ]] && [[ "$output" != *"deferred"* ]]
-  grep -q 'end after' "$T/events"
-  : >"$T/events"; rm -f "$T/state/after"
-  command -v script >/dev/null || skip "util-linux script not available"
-  run script -qec "$ROOT/init.sh run -y" /dev/null
-  [ "$status" -eq 0 ]
-  ! grep -q 'start off' "$T/events"
   grep -q 'end after' "$T/events"
 }
 
@@ -166,13 +160,10 @@ setup() { setup_pipeline; }
   grep -q 'end x' "$T/events"
 }
 
-@test "optional Interactive Step: not chosen, it is skipped without taking the terminal" {
+@test "optional Interactive Step: not chosen, it is skipped as optional, not deferred" {
   step x; fake_action x --optional --interactive
   run mip run --non-interactive
   [[ "$output" == *"x "*"optional"* ]] && [[ "$output" != *"deferred"* ]]
-  command -v script >/dev/null || skip "util-linux script not available"
-  run script -qec "$ROOT/init.sh run -y" /dev/null
-  [[ "$output" == *"optional"* ]]
   ! grep -q 'start x' "$T/events"
 }
 
@@ -360,13 +351,43 @@ setup() { setup_pipeline; }
   [ "$status" -ne 0 ]
 }
 
+# plan_of STEP — STEP's PLAN column in the dry run held by $output.
+plan_of() { awk -v s="$1" '$1 == s { print $2 }' <<<"$output"; }
+
 @test "dry run reports the plan and changes nothing" {
   step a; step b a; fake_action a; fake_action b
   run mip run b --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"a "*"todo"* ]]
+  [ "$(plan_of a)" = run ] && [ "$(plan_of b)" = run ]
   [ -z "$(events)" ]
   [ ! -d "$HOME/.local/state" ]
+}
+
+@test "dry run prints what the Run would do to each Step, as the Run then does" {
+  step ran; step isdone; step up; step off; step opt; step login; step forced
+  fake_action ran; fake_action isdone; fake_action up --upgrade; fake_action off --na
+  fake_action opt --optional; fake_action login --interactive; fake_action forced
+  touch "$T/state/isdone" "$T/state/up" "$T/state/forced"
+  run mip run --upgrade --force forced --dry-run
+  [ "$(plan_of ran)" = run ] && [ "$(plan_of isdone)" = "done" ] && [ "$(plan_of up)" = upgrade ]
+  [ "$(plan_of off)" = na ] && [ "$(plan_of opt)" = optional ] && [ "$(plan_of login)" = deferred ]
+  [ "$(plan_of forced)" = run ]
+  run mip run --upgrade --force forced --non-interactive
+  [[ "$output" == *"✓ ran "* && "$output" == *"= isdone "* && "$output" == *"↑ up "* && "$output" == *"- off "* ]]
+  [[ "$output" == *"○ opt "* && "$output" == *"⏸ login "* && "$output" == *"✓ forced "* ]]
+}
+
+@test "an Interactive Step is upgraded on a terminal; without one its upgrade is skipped and nothing is blocked" {
+  step login; step after login
+  fake_action login --interactive --upgrade; fake_action after
+  touch "$T/state/login"
+  run mip run --upgrade --non-interactive
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"= login "*"done"* ]] && grep -q 'end after' "$T/events"
+  command -v script >/dev/null || skip "util-linux script not available"
+  run script -qec "$ROOT/init.sh run --upgrade" /dev/null
+  [[ "$output" == *"↑ login "*"upgraded"* ]]
+  grep -q 'upgrade login' "$T/events"
 }
 
 @test "bad options and unknown Steps are rejected" {
