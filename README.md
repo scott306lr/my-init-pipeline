@@ -38,6 +38,7 @@ btop            btop-install     path-env
 dust            dust-install     path-env
 hf              hf-install       uv
 hf-cache        hf-cache         path-env      # interactive unless HF_HUB_CACHE_DIR (and, outside home, HF_HUB_CACHE_SHARED) is set
+hf-export       hf-export        hf-cache      # optional, sudo: the shared cache becomes every user's default
 herdr           herdr-install    claude-config codex
 ```
 
@@ -45,6 +46,11 @@ Dependencies decide the order; Steps with no dependency between them run in para
 Interactive Steps (like `gh-auth`) take the terminal while background Steps keep
 going; anything that requires them waits. A Run without a terminal defers them,
 unless a setting already answers the question (`hf-cache` with `HF_HUB_CACHE_DIR` and `HF_HUB_CACHE_SHARED`).
+
+Optional Steps (like `hf-export`, the only one that uses sudo) are offered but
+never run unless you choose them: tick one in the checklist (marked `opt`), or
+name it (`./init.sh run hf-export`). A default or `-y` Run reports them as
+`○ optional`, and what requires them still runs, like Debian's *Suggests*.
 
 ## Commands
 
@@ -78,6 +84,7 @@ such as logging in to `claude` and `codex`. Full logs go to
    # summary: One line shown by `init.sh list`
    # check:   What the Check tests, in words
    # interactive: yes          # only if it needs a human at the keyboard
+   # optional: yes             # only if it should run just when chosen
    # notes:   Anything a future you needs to know (shown by `describe`)
 
    check()   { have mytool; }          # 0 = satisfied, 2 = not applicable here, else = to do
@@ -147,9 +154,12 @@ them). Other users get it by pointing their own `HF_HUB_CACHE` there (the
 `hf-cache` Step offers it once it is exported system-wide). Adding a user takes
 nothing.
 
-Only an admin can export `HF_HUB_CACHE` for users who don't run this Pipeline,
-open a parent folder others can't enter, or install `acl` when `setfacl` is
-missing. Root runs the same script for that, no clone needed:
+Making it every user's default, including users who don't run this Pipeline,
+needs root: tick the optional `hf-export` Step in the checklist, or run
+`./init.sh run hf-export`. It prints the sudo command before running it, and asks
+for a password only if sudo needs one. The same root run also opens any parent
+folder others can't enter and installs `acl` when `setfacl` is missing. Without
+the Pipeline, root runs the script directly, no clone needed:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh \

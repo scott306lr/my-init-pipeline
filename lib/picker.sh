@@ -25,8 +25,9 @@ gum_bin() {
 }
 
 # pick_steps — show every Step with its summary and Check result; print the
-# ticked Step names. Steps with work to do start ticked, so Enter runs what a
-# Run without the picker would; ticking a done Step upgrades it. Exit status: 130 when cancelled, other non-zero
+# ticked Step names. Steps with work to do start ticked, except optional ones
+# (marked "opt"), so Enter runs what a Run without the picker would; ticking an
+# optional Step runs it, ticking a done Step upgrades it. Exit status: 130 when cancelled, other non-zero
 # when no picker could be shown.
 pick_steps() {
   local gum s st mark label
@@ -36,12 +37,13 @@ pick_steps() {
   for s in "${STEPS[@]}"; do
     st="$(check_status "$s")"
     case "$st" in done | na) mark="$st" ;; *) mark="" ;; esac
+    if [ "$st" = todo ] && is_optional "$s"; then mark=opt; fi
     # gum splits --selected on commas, so labels carry none.
     label="$(printf '%-15s %-4s  %s' "$s" "$mark" "$(action_field "$s" summary | tr ',' ';' | cut -c 1-72)")"
     opts+=("$label"$'\t'"$s")
-    if [ "$st" = todo ]; then ticked+=("$label"); fi
+    if [ "$st" = todo ] && [ "$mark" != opt ]; then ticked+=("$label"); fi
   done
   "$gum" choose --no-limit --label-delimiter $'\t' --height "$((${#STEPS[@]} + 1))" \
-    --header "Steps to run (ticked = install; a ticked 'done' Step is upgraded)" \
+    --header "Steps to run (ticked = install; 'opt' = optional, off unless ticked; a ticked 'done' Step is upgraded)" \
     --selected "$(IFS=,; printf '%s' "${ticked[*]}")" "${opts[@]}"
 }

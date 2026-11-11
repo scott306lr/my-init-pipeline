@@ -347,7 +347,7 @@ share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >
   getfacl -p "$T/srv/hub" | grep -qx 'default:other::rwx'
   hfc check
   run hfc note                               # not exported system-wide here: say how
-  [[ "$output" == *"sudo bash $ROOT/admin/share-hf-cache.sh $T/srv/hub"* ]]
+  [[ "$output" == *"./init.sh run hf-export"* ]]
   setfacl -b "$T/srv/hub"; chmod 755 "$T/srv/hub"
   run hfc check
   [ "$status" -eq 1 ]
@@ -367,4 +367,30 @@ share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >
   share_cfg "$HOME/hub" ""
   run hfc interactive                        # inside home: never asked
   [ "$status" -eq 1 ]
+}
+
+@test "hf-export: n/a unless HF_HUB_CACHE is shared; work to do while it is not exported" {
+  run env HF_HUB_CACHE= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  [ "$status" -eq 2 ]
+  mkdir -p "$T/priv"
+  run env HF_HUB_CACHE="$T/priv" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  [ "$status" -eq 2 ]
+  command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
+  bash "$ROOT/admin/share-hf-cache.sh" "$T/srv/hub" >/dev/null
+  run env HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  [ "$status" -eq 1 ]                        # /etc/profile.d does not export this test directory
+}
+
+@test "hf-export: needs a terminal only when sudo needs a password; run prints the sudo command, or what to ask an admin" {
+  mkdir -p "$T/bin"
+  printf '#!/bin/sh\necho "$*" >>"%s/sudo.calls"\nexit "${SUDO_RC:-0}"\n' "$T" >"$T/bin/sudo"; chmod +x "$T/bin/sudo"
+  export PATH="$T/bin:$PATH"
+  run env SUDO_RC=0 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" interactive
+  [ "$status" -eq 1 ]
+  SUDO_RC=1 bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" interactive
+  run env SUDO_RC=0 HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run
+  [ "$status" -eq 0 ] && [[ "$output" == *"hf-export needs sudo: sudo bash $ROOT/admin/share-hf-cache.sh $T/srv/hub"* ]]
+  grep -qxF "bash $ROOT/admin/share-hf-cache.sh $T/srv/hub" "$T/sudo.calls"
+  run env SUDO_RC=1 HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run
+  [ "$status" -ne 0 ] && [[ "$output" == *"ask an admin to run: curl"*"sudo bash -s -- $T/srv/hub"* ]]
 }

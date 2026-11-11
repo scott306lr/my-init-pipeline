@@ -16,7 +16,8 @@
 #   -j, --jobs N        parallel Steps (default: number of CPUs; 1 = serial)
 #   --non-interactive   skip Interactive Steps (and what requires them)
 #   --dry-run           print the plan with current Check results; change nothing
-#   -y, --yes           no Step picker: run every Step that is not done
+#   -y, --yes           no Step picker: run every Step that is not done (but
+#                       optional ones, which run only when named or ticked)
 #
 # Environment overrides (mainly for tests): MIP_CONF, MIP_ACTIONS_DIR, MIP_USER_CONFIG,
 # MIP_HEARTBEAT (seconds of silence before a "still running" line; default 30).
@@ -70,7 +71,7 @@ cmd_run() {
   local -a targets=()
   local dry=0 yes=0 rc=0 picked mode=install
   local -A FORCE=() UPGRADE=()
-  declare -gA STEP_MODE=()
+  declare -gA STEP_MODE=() OFFERED=()
   MIP_JOBS="$(nproc 2>/dev/null || echo 4)"
   MIP_INTERACTIVE=1
   while [ $# -gt 0 ]; do
@@ -113,10 +114,13 @@ cmd_run() {
 
   local -a plan
   mapfile -t plan < <(pipeline_select "${targets[@]}")
+  local -A chosen=()
+  for s in "${targets[@]}" "${!FORCE[@]}"; do chosen[$s]=1; done
   for s in "${plan[@]}"; do
     if [ -n "${FORCE[$s]:-}" ]; then STEP_MODE[$s]=force
     elif [ -n "${UPGRADE[$s]:-}" ]; then STEP_MODE[$s]=upgrade
     else STEP_MODE[$s]="$mode"; fi
+    if is_optional "$s" && [ -z "${chosen[$s]:-}" ]; then OFFERED[$s]=1; fi
   done
 
   if [ "$dry" = 1 ]; then

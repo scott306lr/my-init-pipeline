@@ -8,6 +8,8 @@
 #   na        Check reported "not applicable here" (exit 2) — skipped
 #   failed    Action or post-run Check failed
 #   deferred  Interactive Step in a non-interactive Run
+#   optional  An optional Step with work to do that was not chosen (named,
+#             ticked in the picker, or forced) — skipped, like Debian's Suggests
 #   blocked   A required Step failed, was deferred, or was blocked
 #   aborted   Not started because another Step failed
 
@@ -122,6 +124,10 @@ action_field() {
 # `interactive: yes` and its interactive() function, if it defines one, agrees.
 # An Action defines interactive() when a setting can answer its prompt, so a
 # Run without a terminal still runs it once that setting is given.
+# is_optional STEP — true if the header says `optional: yes`: offered, never run
+# unless chosen.
+is_optional() { [ "$(action_field "$1" optional)" = yes ]; }
+
 is_interactive() {
   [ "$(action_field "$1" interactive)" = yes ] || return 1
   local rc=0
@@ -160,6 +166,7 @@ step_execute() {
     echo "-- check"
     step_call "$step" check || rc=$?
     if [ "$rc" = 2 ]; then echo "RESULT na"; return; fi
+    if [ "$rc" != 0 ] && [ -n "${OFFERED[$step]:-}" ]; then echo "RESULT optional"; return; fi
     if [ "$rc" = 0 ]; then
       if [ "$mode" = upgrade ]; then
         echo "-- upgrade"
@@ -223,18 +230,20 @@ report() {
     ran) mark="✓" ;;  upgraded) mark="↑" ;;  done) mark="=" ;;  na) mark="-" ;;
     failed) mark="✗"; extra="  log: $RUN_DIR/$step.log" ;;
     deferred) mark="⏸"; extra="  (interactive; rerun with a terminal)" ;;
+    optional) mark="○"; extra="  (optional; to run it: ./init.sh run $step)" ;;
     *) mark="⊘" ;;
   esac
   [ -n "$secs" ] && secs="${secs}s"
   printf '%s %-16s %-9s %5s%s\n' "$mark" "$step" "$result" "$secs" "$extra"
 }
 
-is_satisfied() { case "$1" in ran | upgraded | done | na) return 0 ;; esac; return 1; }
+is_satisfied() { case "$1" in ran | upgraded | done | na | optional) return 0 ;; esac; return 1; }
 is_dead() { case "$1" in failed | deferred | blocked | aborted) return 0 ;; esac; return 1; }
 
 # pipeline_run STEP... — schedule the given (already selected, TOPO-ordered)
-# Steps. Uses MIP_JOBS, MIP_INTERACTIVE (0/1) and STEP_MODE[step] (see
-# step_execute; install when unset).
+# Steps. Uses MIP_JOBS, MIP_INTERACTIVE (0/1), STEP_MODE[step] (see
+# step_execute; install when unset) and OFFERED[step] (an optional Step that
+# was not chosen: skipped while it has work to do).
 # Returns 1 if any Step failed.
 pipeline_run() {
   local -a plan=("$@")
@@ -302,7 +311,9 @@ pipeline_run() {
           # needs no human; only one with work to do takes the terminal.
           r=todo
           if [ "${STEP_MODE[$s]:-install}" != force ]; then r="$(check_status "$s")"; fi
-          if [ "$r" = todo ] && [ "$MIP_INTERACTIVE" != 1 ]; then
+          if [ "$r" = todo ] && [ -n "${OFFERED[$s]:-}" ]; then
+            r=optional
+          elif [ "$r" = todo ] && [ "$MIP_INTERACTIVE" != 1 ]; then
             r=deferred
           elif [ "$r" = todo ]; then
             start[$s]=$SECONDS
@@ -356,7 +367,7 @@ pipeline_run() {
     esac
     case "${state[$s]}" in
       ran | upgraded) n_ok=$((n_ok + 1)) ;;
-      done | na) n_skip=$((n_skip + 1)) ;;
+      done | na | optional) n_skip=$((n_skip + 1)) ;;
       failed) failed=1 ;;
       *) n_left=$((n_left + 1)) ;;
     esac

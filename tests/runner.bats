@@ -140,6 +140,33 @@ setup() { setup_pipeline; }
   grep -q 'end after' "$T/events"
 }
 
+@test "optional: skipped (not run) unless named or forced; done shows done; what requires it still runs" {
+  step x; step after x; step other
+  fake_action x --optional; fake_action after; fake_action other
+  run mip run -y
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"○ x "*"optional; to run it: ./init.sh run x"* ]]
+  ! grep -q 'start x' "$T/events"
+  grep -q 'end after' "$T/events" && grep -q 'end other' "$T/events"
+  run mip run x --non-interactive            # named: runs
+  grep -q 'end x' "$T/events"
+  run mip run -y
+  [[ "$output" == *"= x "*"done"* ]]
+  rm "$T/state/x"; : >"$T/events"
+  run mip run --force x --non-interactive    # forced: runs
+  grep -q 'end x' "$T/events"
+}
+
+@test "optional Interactive Step: not chosen, it is skipped without taking the terminal" {
+  step x; fake_action x --optional --interactive
+  run mip run --non-interactive
+  [[ "$output" == *"x "*"optional"* ]] && [[ "$output" != *"deferred"* ]]
+  command -v script >/dev/null || skip "util-linux script not available"
+  run script -qec "$ROOT/init.sh run -y" /dev/null
+  [[ "$output" == *"optional"* ]]
+  ! grep -q 'start x' "$T/events"
+}
+
 @test "non-interactive: satisfied Interactive Step counts as done" {
   step login; step needs-login login
   fake_action login --interactive; fake_action needs-login
@@ -366,6 +393,18 @@ picker_pipeline() {
   grep -q 'upgrade b' "$T/events"
   ! grep -q 'start b' "$T/events"
   [[ "$output" == *"↑ b"* ]]
+}
+
+@test "picker: an optional Step with work to do starts unticked, marked opt; ticking it runs it" {
+  picker_pipeline
+  step x; fake_action x --optional
+  fake_gum 0 x
+  run mip_tty run
+  [ "$status" -eq 0 ]
+  grep -q $'^x  *opt .*\tx$' "$T/gum.args"
+  sel="$(grep -A1 -x -- '--selected' "$T/gum.args" | tail -n 1)"
+  [[ "$sel" != *"x "* ]]
+  grep -q 'end x' "$T/events"
 }
 
 @test "picker: cancelling runs nothing and exits 130; ticking nothing runs nothing" {

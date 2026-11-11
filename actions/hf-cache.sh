@@ -74,9 +74,9 @@ note() {
   dir="$(recorded HF_HUB_CACHE)"
   # The runner inherits the shell that started it, so a stale HF_HOME shows here.
   if [ -n "${HF_HOME:-}" ]; then echo "HF_HOME is still set in this shell: run 'unset HF_HOME' or open a new terminal"; fi
-  # Exporting it for users who never run this Pipeline is the one part that needs root.
+  # Exporting it for users who never run this Pipeline is the optional hf-export Step.
   if [ -n "$dir" ] && shared "$dir" && ! bash "$MIP_ROOT/admin/share-hf-cache.sh" --exported "$dir"; then
-    echo "$dir is shared; to make it every user's HF_HUB_CACHE (also users who don't run my-init-pipeline): sudo bash $MIP_ROOT/admin/share-hf-cache.sh $dir"
+    echo "$dir is shared; to make it every user's default (needs sudo): ./init.sh run hf-export"
   fi
 }
 

@@ -15,6 +15,8 @@ _Avoid_: service, app, stage.
 
 **Interactive Step** — A Step that needs a human at the keyboard, for example to log in. A non-interactive Run skips it.
 
+**Optional Step** — A Step that is offered but runs only when chosen: named on the command line, ticked in the Step picker, or forced. Otherwise a Step with work to do is skipped as optional, and what requires it still runs.
+
 **Note** — A message a Step leaves for the human, shown at the end of a Run. It covers follow-up work the Pipeline does not do itself, such as logging in to a Tool.
 
 **Tool** — A program the Pipeline puts on the server (claude, codex, herdr, gh, nvitop). It is installed by a Step, but it is not itself a Step.
