@@ -1,212 +1,169 @@
 # my-init-pipeline
 
-One command to bring a fresh Linux server to my working setup, **without root**:
-gh, Claude Code (plus my synced `~/.claude`), Codex, herdr, uv, nvitop, zoxide,
-fzf, lazygit, delta, btop, dust and the Hugging Face CLI, plus uv-managed Pythons
-(with C headers), and sets git's commit identity.
+Brings a fresh Linux server to my working setup in one command, as my own user,
+without root: gh, Claude Code with my synced `~/.claude`, Codex, herdr, uv,
+uv-managed Pythons (with C headers), nvitop, zoxide, fzf, lazygit, delta, btop,
+dust, the Hugging Face CLI and a Hugging Face cache folder, plus git's commit
+identity. Words like **Step**, **Action**, **Check** and **Run** are defined in
+[GLOSSARY.md](GLOSSARY.md).
+
+## Set up a server
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/bootstrap.sh | bash
 ```
 
-This clones the repo to `~/my-init-pipeline` and runs `./init.sh run`, which on a
-terminal first shows a checklist of Steps to pick from (Enter runs everything not
-yet done; `| bash -s -- -y` skips it). Safe to re-run:
-Steps that are already satisfied are skipped. Vocabulary is in [GLOSSARY.md](GLOSSARY.md).
+This clones the repo to `~/my-init-pipeline` and starts `./init.sh run`. On a
+terminal it opens the **checklist**: Steps with work to do start ticked, so Enter
+runs everything not yet done. Answer the questions that follow (gh login, the
+Hugging Face cache folder), then the **Notes** at the end (log in to `claude`,
+`codex login`, `source ~/.bashrc`). Re-running is safe: Steps whose Check passes
+are skipped. `| bash -s -- -y` runs without the checklist.
 
-## The Pipeline
+Run it as yourself. The only Step that needs root, `hf-export`, asks for sudo
+itself, and `init.sh` refuses to run as root outside a container or CI job.
 
-`pipeline.conf` declares one **Step** per line: its name, the **Action** that does
-the work (`actions/<action>.sh`), and the Steps it requires.
+## Update a server
 
-```
-path-env        path-env
-gh              gh-install       path-env
-gh-auth         gh-auth          gh                 # interactive
-claude          claude-install   path-env
-claude-config   claude-config    claude gh-auth
-codex           codex-install    path-env
-uv              uv-install       path-env
-nvitop          nvitop-install   uv
-python          python-install   uv            # managed CPython (with headers); uv prefers it
-zoxide          zoxide-install   path-env
-fzf             fzf-install      path-env
-lazygit         lazygit-install  path-env
-delta           delta-install    path-env      # also sets git's pager, if none is set
-git-identity    git-identity                   # user.name / user.email, if unset
-btop            btop-install     path-env
-dust            dust-install     path-env
-hf              hf-install       uv
-hf-export       hf-export                      # optional, sudo: root prepares and shares the cache folder for every user
-hf-cache        hf-cache         path-env hf-export  # interactive unless HF_CACHE_DIR (and, outside home, HF_CACHE_SHARED) is set
-herdr           herdr-install    claude-config codex
+```bash
+cd ~/my-init-pipeline
+./init.sh update run --upgrade   # pull this repo, then upgrade every installed Tool
+./init.sh update run             # pull, then the checklist: tick a done Step to upgrade just that one
 ```
 
-Dependencies decide the order; Steps with no dependency between them run in parallel.
-Interactive Steps (like `gh-auth`) take the terminal while background Steps keep
-going; anything that requires them waits. A Run without a terminal defers them,
-unless a setting already answers the question (`hf-cache` with `HF_CACHE_DIR` and `HF_CACHE_SHARED`).
+`update` only fast-forwards. On a checkout too old to have it, run
+`git pull --ff-only` once by hand. A pull refuses while the checkout has local
+edits that upstream also changed, typically `config.sh`: keep settings in the
+environment instead (see Settings).
 
-Optional Steps (like `hf-export`, the only one that uses sudo) are offered but
-never run unless you choose them: tick one in the checklist (marked `opt`), or
-name it (`./init.sh run hf-export`). A default or `-y` Run reports them as
-`○ optional`, and what requires them still runs, like Debian's *Suggests*.
+`--upgrade` runs each Tool's own updater and pulls `~/my-claude-setup` before
+re-installing it. A setup clone with uncommitted work is left alone, with a Note
+to publish it through `/sync-claude`.
 
-## Commands
+## Share the Hugging Face cache
 
-| Command | |
-|---|---|
-| `./init.sh run` | On a terminal, pick Steps from a checklist, then run them (plus what they require). Steps with work to do start ticked; ticking a Step that is already done upgrades it (re-runs it if it has no `upgrade()`) |
-| `./init.sh run -y` | Run the whole Pipeline without the checklist (also what happens without a terminal) |
-| `./init.sh run herdr` | Run `herdr` plus whatever it requires that isn't satisfied yet |
-| `./init.sh run --force codex` | Re-run a Step even though its Check passes |
-| `./init.sh run --upgrade` | Upgrade everything already installed: each Tool with its own updater, and the claude setup repo pulled (fast-forward only) and re-installed |
-| `./init.sh update` | Pull the latest my-init-pipeline (fast-forward only). `./init.sh update run --upgrade` updates the pipeline, then everything it installed |
-| `./init.sh run --dry-run` | Show the plan and current Check results; change nothing |
-| `./init.sh run -j 1` | One Step at a time (easier to debug) |
-| `./init.sh run --non-interactive` | Skip Interactive Steps and what requires them |
-| `./init.sh list` | Step → Action → requires → Check result → summary |
-| `./init.sh describe <step>` | Everything about one Step |
+`hf-cache` puts Hugging Face data in one **cache folder**, laid out like
+`HF_HOME` without the login token: `hub/` holds models and datasets downloaded
+from the Hub (`HF_HUB_CACHE`), `datasets/` the datasets library's Arrow cache
+(`HF_DATASETS_CACHE`). The token stays private in `~/.cache/huggingface`.
 
-If a Run changed your shell setup (PATH entries your current shell lacks, or a
-new hook such as zoxide's), it ends by printing `source ~/.bashrc` (a script
-can't update the shell that started it; new terminals pick it up on their own).
+- **Your own folder.** Accept the suggested `/shared/huggingface_cache` (or name
+  another). For a folder outside your home that you own, it asks whether to share
+  it with every user; sharing needs no sudo.
+- **Another user's folder.** One someone else owns is used as its owner shared
+  it, through an ACL or a setgid group you belong to. Nothing is asked.
+- **A folder only root can prepare**, or one every user should get by default
+  (including users who never run this Pipeline): tick the optional `hf-export`
+  too, or run `./init.sh run hf-export hf-cache`. `hf-export` runs first, prints
+  its sudo command, and has root create, share and export the folder; `hf-cache`
+  then offers it.
 
-Each Run prints one line per Step and ends with **Notes**: things left for you,
-such as logging in to `claude` and `codex`. Full logs go to
-`~/.local/state/my-init-pipeline/runs/latest/<step>.log`.
+Pointing `hf-cache` at a new folder (`./init.sh run --force hf-cache hf-cache`)
+moves your downloads there, merging, and keeping the new folder's copy where both
+have one. Downloads move only out of a private cache of yours; a shared one stays
+as it is.
 
-## Adding, changing and removing Steps
+Share only on a server whose users you trust: every user can change every cached
+file, including model code that `trust_remote_code` runs.
 
-1. Write `actions/<action>.sh`:
+Root can also share a folder without this Pipeline:
+`curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- /shared/huggingface_cache`.
+The script's header explains what it does as root and as a folder's owner.
+
+## How a Run behaves
+
+- **Order and parallelism.** `pipeline.conf` lists each Step, its Action
+  (`actions/<action>.sh`) and the Steps it requires. Requirements decide the
+  order; independent Steps run in parallel. `./init.sh list` shows every Step
+  with its Check result.
+- **Choosing Steps.** The checklist (gum `choose`; space ticks, `a` ticks all,
+  Enter runs) appears on a terminal when no Step is named. Ticking a Step with
+  work to do runs it, ticking a done Step upgrades it, ticking an Optional Step
+  (marked `opt`) runs it. Naming Steps (`./init.sh run herdr`) runs them plus
+  what they require.
+- **Interactive Steps** take the terminal while background Steps continue. A Run
+  without a terminal defers them, unless settings already answer their
+  questions.
+- **Optional Steps** (`hf-export`) run only when ticked, named or `--force`d.
+  Otherwise the Run reports `○ optional` and what requires them still runs, like
+  Debian's *Suggests*.
+- **Output.** One line per Step, then Notes. Full logs are in
+  `~/.local/state/my-init-pipeline/runs/latest/<step>.log`. An Interactive Step's
+  output goes to the terminal, so its log holds only the result.
+
+All commands and options: `./init.sh help`. One Step in full: `./init.sh describe <step>`.
+
+## Settings
+
+`config.sh` holds every setting with a comment saying what it does: the claude
+setup repo, git identity, the Hugging Face cache folder (`HF_CACHE_DIR`,
+`HF_CACHE_SHARED`, `HF_CACHE_SUGGESTED`) and the managed Python versions.
+Override any of them from the environment for one Run, e.g.
+`HF_CACHE_DIR=/data/hf HF_CACHE_SHARED=no ./init.sh run hf-cache`. An empty
+environment value means "use the default"; to blank a setting, edit it in a
+copy of `config.sh` and point `MIP_USER_CONFIG` at that copy (it replaces
+`config.sh` whole).
+
+## Adding or changing a Step
+
+1. Write `actions/<action>.sh`. A header of `# key: value` lines, then functions:
 
    ```bash
    # summary: One line shown by `init.sh list`
    # check:   What the Check tests, in words
-   # interactive: yes          # only if it needs a human at the keyboard
-   # optional: yes             # only if it should run just when chosen
-   # notes:   Anything a future you needs to know (shown by `describe`)
+   # interactive: yes          # if it can need a human at the keyboard
+   # optional: yes             # if it should run only when chosen
+   # notes:   What a future reader needs to know (shown by `describe`)
 
-   check()   { have mytool; }          # 0 = satisfied, 2 = not applicable here, else = to do
-   run()     { run_installer https://example.com/install.sh; }
-   upgrade() { mytool self-update; }   # optional: --upgrade, or ticking a done Step
-   note()    { [ "$1" = upgraded ] || echo "Remember to ..."; }  # optional, shown after a Run where
-                                       # it ran or upgraded; $1 says which
-   interactive() { [ -z "$MYTOOL_TOKEN" ]; }  # optional, with `interactive: yes`: 0 while a human is still needed
+   check()       { have mytool; }             # 0 = satisfied, 2 = not applicable here, else = to do
+   run()         { run_installer https://example.com/install.sh; }
+   upgrade()     { mytool self-update; }      # used by --upgrade and by ticking a done Step
+   note()        { [ "$1" = upgraded ] || echo "Log in with: mytool login"; }   # $1 is ran or upgraded
+   interactive() { [ -z "$MYTOOL_TOKEN" ]; }  # with `interactive: yes`: 0 while a human is still needed
    ```
 
-2. Add a line to `pipeline.conf`: `mytool  mytool-install  path-env`.
+2. Add `mytool  mytool-install  path-env` to `pipeline.conf`.
 3. `./init.sh describe mytool`, then `./init.sh run mytool`.
 
-Rules for Actions:
-- **Checks must have no side effects.** `list` and `--dry-run` call them, and the
-  same goes for `interactive()`.
-- After `run`, the runner runs the Check again, and the Step only succeeds if it passes.
-- Never edit rc files. Use `add_path '$HOME/some/bin'` for PATH,
-  `add_env VAR '$HOME/value'` for an exported variable, and
-  `add_shell_init '<line>'` for interactive-only setup (e.g. `eval "$(tool init bash)"`).
-  All three record into `~/.config/my-init-pipeline/env.sh`. `~/.bashrc` sources that file through one
-  marked block.
-- Each function runs in a fresh `bash -eo pipefail`, with `lib/common.sh` and `config.sh`
-  loaded. Helpers: `have`, `info`, `warn`, `die`, `fetch`, `run_installer`,
-  `github_latest_tag`, `machine_arch`, `release_sha256`, `install_release_binary`
-  (download a GitHub release tarball, verify its sha256 when published, install
-  one binary into `~/.local/bin` or a given folder), `add_path`, `add_env`,
-  `remove_env`, `add_shell_init`, `in_home` (a path is in your home),
-  `share_hf_cache` (`admin/share-hf-cache.sh`), `root_outside_container`.
+The conventions every Action follows:
 
-To swap how something is installed, point its Step at a different Action. The
-Step name and every dependency on it stay unchanged. To remove a Step, delete its
-line; validation reports anything that still requires it.
-
-## Settings
-
-`config.sh` holds the settings for `claude-config`, `git-identity`, `hf-cache` and `python`. Each one can also be overridden from the environment:
-
-| Variable | Default | |
-|---|---|---|
-| `CLAUDE_SETUP_REPO` | `scott306lr/my-claude-setup` | the private copy of [my-portable-claude](https://github.com/scott306lr/my-portable-claude) |
-| `CLAUDE_SETUP_DIR` | `~/my-claude-setup` | where it is cloned |
-| `CLAUDE_SETUP_PROTOCOL` | `https` | `https` (via gh's credential helper) or `ssh` (needs a key on GitHub) |
-| `CLAUDE_SETUP_REF` | *(default branch)* | branch for a fresh clone, e.g. to test a change before merging it |
-| `GIT_USER_NAME` | `scott306lr` | git `user.name`, written only if `~/.gitconfig` has none |
-| `GIT_USER_EMAIL` | `scott306lr@gmail.com` | git `user.email`, likewise |
-| `HF_CACHE_DIR` | *(empty: asked on the terminal, suggesting `HF_CACHE_SUGGESTED`)* | the Hugging Face cache folder, e.g. `/data/hf`: `HF_HUB_CACHE=<folder>/hub` (models and datasets from the Hub) and `HF_DATASETS_CACHE=<folder>/datasets` (the datasets library's Arrow cache) are exported for every shell. `HF_HOME` is left at `~/.cache/huggingface`, so the token stays private. Change it later with `./init.sh run --force hf-cache hf-cache`: your downloads move to the new folder |
-| `HF_CACHE_SUGGESTED` | `/shared/huggingface_cache` | what that question offers when no cache folder is in effect yet, if you can create it (else `~/.cache/huggingface`); Enter takes it |
-| `HF_CACHE_SHARED` | *(empty: asked)* | `yes` shares an `HF_CACHE_DIR` outside your home with every user of the server, `no` keeps it yours (see below) |
-| `MANAGED_PYTHON_VERSIONS` | `3.10 3.12` | installed with `uv python install`; `UV_PYTHON_PREFERENCE=only-managed` is exported so `uv venv` / `uv sync` use them (they have `Python.h`) instead of a system Python that may lack its `-dev` package |
-
-Both protocols work because the setup repo records its GitHub marketplaces as
-`owner/repo` (its ADR 0006); Claude Code tries SSH first, then HTTPS.
-
-## Sharing the Hugging Face cache between users
-
-Models and datasets are big, so everyone on a server can share one cache folder
-(`hub/` for Hub downloads, `datasets/` for the datasets library's Arrow cache)
-while each user keeps their own `HF_HOME` (token, login state). No group and no
-sudo: when the `hf-cache` Step's folder is outside your home, it asks whether to
-share it with every user of the server (or set `HF_CACHE_SHARED=yes`):
-
-```bash
-HF_CACHE_DIR=/shared/huggingface_cache HF_CACHE_SHARED=yes ./init.sh run hf-cache
-```
-
-Sharing runs `admin/share-hf-cache.sh` as you: every user may read, add and
-replace entries, and a default ACL keeps new entries that way whoever creates
-them, whatever their umask (Hugging Face's `blobs/` stay read-only, as it makes
-them). Your earlier downloads (models and the datasets cache) move into the
-folder and become everyone's too; a cache that is already shared is never
-emptied. Other users get the folder by running the `hf-cache` Step, which offers
-it once it is exported system-wide. Adding a user takes nothing.
-
-Root is needed to make the folder every user's default (including users who
-don't run this Pipeline), and to prepare a folder you can't write to yourself
-(say root created it). That is the optional `hf-export` Step: tick it in the
-checklist, or run `./init.sh run hf-export hf-cache`. It runs before `hf-cache`,
-asks for the folder (or takes `HF_CACHE_DIR`), prints the sudo command, and has
-root create the folder with `hub/` and `datasets/`, share it and export it;
-`hf-cache` then offers that folder. It takes the terminal when sudo needs your
-password (with passwordless sudo it runs without one).
-Never run `init.sh` itself with sudo: it would set up root's account instead of
-yours, so outside a container or CI job it refuses. The same root run also
-opens any parent folder others can't enter and installs `acl` when `setfacl` is
-missing. Without the Pipeline, root runs the script directly, no clone needed:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh \
-  | sudo bash -s -- /shared/huggingface_cache
-```
-
-Any user can then change any cached file, including model code that
-`trust_remote_code` runs, so share only on a server whose users you trust.
-
-## Known caveats
-
-- herdr always adds a SessionStart hook with this machine's absolute path to
-  `~/.claude/settings.json`, which is shared. The `herdr` Step rewrites it to the
-  `$HOME` form, and its Check flags it if it comes back. Updates to herdr's hook
-  *script* (`dotfiles/hooks/herdr-agent-state.sh`) do land in the setup repo;
-  sync them.
-- `install.sh` in the claude setup repo exits 0 even when a plugin marketplace
-  fails to register. `claude-config` surfaces those warnings as a Note.
+- `check()` and `interactive()` only look: `list`, `--dry-run` and the checklist
+  call them. After `run()`, the Check runs again and decides success.
+- Shell setup goes through `add_path`, `add_env`, `remove_env` and
+  `add_shell_init`, which write `~/.config/my-init-pipeline/env.sh`; `~/.bashrc`
+  only sources that file, from one marked block.
+- Each function runs in a fresh `bash -eo pipefail` with `lib/common.sh` and
+  `config.sh` loaded; the helpers are documented there. Logic two Actions share
+  goes in `lib/` ([ADR 0001](docs/adr/0001-pure-bash-with-plain-text-step-table.md)).
+- To install a Tool another way, point its Step at a different Action; the Step
+  name and its dependents stay. Deleting a Step's line makes validation name
+  whatever still requires it.
 
 ## Tests
 
 ```bash
-tests/run.sh                              # bats: runner behaviour with fake Actions (fetches bats-core on first use)
-tests/e2e.sh                              # real installs in a throwaway HOME, run twice; the second must be a no-op
-GH_TOKEN=$(gh auth token) tests/e2e.sh    # also covers claude-config and herdr
-tests/docker.sh                           # ubuntu:22.04, non-root, no SSH key (HTTPS only), twice
-tests/docker.sh --interactive             # shell in that container, to try gh auth login by hand
-tests/admin.sh                            # sharing as root (in ubuntu:22.04; in CI, on the runner): the script, and the hf-cache Step as a user
+tests/run.sh                            # bats: the runner with fake Actions, and each Action's logic
+tests/admin.sh                          # cache sharing as root: in ubuntu:22.04 (on the runner in CI)
+tests/e2e.sh                            # real installs in a throwaway HOME, twice; the second changes nothing
+GH_TOKEN=$(gh auth token) tests/e2e.sh  # e2e including claude-config and herdr
+tests/docker.sh [--interactive]         # e2e in ubuntu:22.04 as a non-root user without an SSH key
 ```
 
-CI (`.github/workflows/ci.yml`, ubuntu-22.04) runs shellcheck, bats, a bootstrap
-dry run, the admin test and the non-interactive e2e.
+CI (`.github/workflows/ci.yml`) runs shellcheck, bats, a bootstrap dry run, the
+sharing test and the non-interactive e2e. Its shellcheck is 0.8, which flags
+`A && B || C` (SC2015) where newer versions do not; check with the same version:
+`uvx --from shellcheck-py==0.8.0.4 shellcheck -x init.sh bootstrap.sh lib/*.sh actions/*.sh admin/*.sh tests/*.sh config.sh`.
 
-The checklist is [gum](https://github.com/charmbracelet/gum) `choose`, pinned and
-checksum-verified, fetched on first use into `~/.local/state/my-init-pipeline/bin`
-(it is the runner's helper, not a Tool on your PATH). Space ticks and unticks, `a`
-ticks all, Enter runs. If gum can't be fetched, the Run warns and runs every Step.
+## Known caveats
+
+- herdr writes a SessionStart hook with this machine's absolute path into the
+  shared `~/.claude/settings.json`. The `herdr` Step rewrites it to the `$HOME`
+  form, and its Check notices if it comes back. Updates to herdr's hook script
+  (`dotfiles/hooks/herdr-agent-state.sh`) are real changes: publish them with
+  `/sync-claude`.
+- The claude setup repo's `install.sh` exits 0 even when a plugin marketplace
+  fails to register; `claude-config` turns those warnings into a Note.
+- The checklist pins gum v0.17.0: gum v2 never ticks on space
+  ([ADR 0002](docs/adr/0002-gum-step-picker.md)).
 
 Design decisions: [docs/adr/](docs/adr/).
