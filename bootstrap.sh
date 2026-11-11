@@ -2,6 +2,7 @@
 # One-button entry point for a fresh server:
 #
 #   curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/bootstrap.sh | bash
+#   curl -fsSL .../bootstrap.sh | bash -s -- -y             # skip the Step checklist
 #   curl -fsSL .../bootstrap.sh | bash -s -- --dry-run      # any `init.sh run` options
 #
 # Clones (or fast-forwards) the repo to ~/my-init-pipeline, then runs the Pipeline.

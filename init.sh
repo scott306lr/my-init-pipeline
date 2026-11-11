@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # my-init-pipeline — bring a fresh server to the declared state, without root.
 #
-#   ./init.sh run [STEP...] [options]   run the Pipeline (or STEPs + what they require)
+#   ./init.sh run [STEP...] [options]   run the Pipeline (or STEPs + what they require);
+#                                       on a terminal with no STEP, pick Steps first
 #   ./init.sh list                      Step → Action → requires → check → summary
 #   ./init.sh describe STEP             full description of one Step
 #   ./init.sh help
@@ -12,6 +13,7 @@
 #   -j, --jobs N        parallel Steps (default: number of CPUs; 1 = serial)
 #   --non-interactive   skip Interactive Steps (and what requires them)
 #   --dry-run           print the plan with current Check results; change nothing
+#   -y, --yes           no Step picker: run every Step that is not done
 #
 # Environment overrides (mainly for tests): MIP_CONF, MIP_ACTIONS_DIR, MIP_USER_CONFIG,
 # MIP_HEARTBEAT (seconds of silence before a "still running" line; default 30).
@@ -27,6 +29,8 @@ export MIP_ROOT MIP_CONF MIP_ACTIONS_DIR
 . "$MIP_ROOT/lib/common.sh"
 # shellcheck source=lib/pipeline.sh
 . "$MIP_ROOT/lib/pipeline.sh"
+# shellcheck source=lib/picker.sh
+. "$MIP_ROOT/lib/picker.sh"
 
 usage() { sed -n '2,/^set /{/^set /d;s/^# \{0,1\}//;p}' "$0"; }
 
@@ -61,7 +65,7 @@ cmd_describe() {
 
 cmd_run() {
   local -a targets=()
-  local dry=0
+  local dry=0 yes=0 rc=0 picked
   declare -gA FORCE=()
   MIP_JOBS="$(nproc 2>/dev/null || echo 4)"
   MIP_MODE=install
@@ -73,6 +77,7 @@ cmd_run() {
       -j | --jobs) [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "$1 needs a positive number"; MIP_JOBS="$2"; shift ;;
       --non-interactive) MIP_INTERACTIVE=0 ;;
       --dry-run) dry=1 ;;
+      -y | --yes) yes=1 ;;
       -*) die "unknown option $1 (see: ./init.sh help)" ;;
       *) targets+=("$1") ;;
     esac
@@ -83,6 +88,24 @@ cmd_run() {
   load_pipeline
   local s
   for s in "${targets[@]}" "${!FORCE[@]}"; do need_step "$s"; done
+
+  # Like create-t3-app: ask on a terminal, unless told what to do (Steps named,
+  # -y, an upgrade or a dry run, which must not download the picker).
+  if [ ${#targets[@]} -eq 0 ] && [ ${#FORCE[@]} -eq 0 ] && [ "$yes" = 0 ] && [ "$dry" = 0 ] &&
+    [ "$MIP_MODE" = install ] && [ "$MIP_INTERACTIVE" = 1 ] && [ -t 0 ] && [ -t 1 ]; then
+    picked="$(pick_steps)" || rc=$?
+    if [ "$rc" = 130 ]; then echo "Cancelled; nothing was run."; return 130; fi
+    if [ "$rc" != 0 ]; then
+      warn "could not show the Step picker (gum v$GUM_VERSION unavailable); running every Step"
+    elif [ -z "$picked" ]; then
+      echo "No Steps selected; nothing to do."; return 0
+    else
+      mapfile -t targets <<<"$picked"
+      for s in "${targets[@]}"; do
+        if [ "$(check_status "$s")" = "done" ]; then FORCE[$s]=1; fi   # ticked although done: re-run it
+      done
+    fi
+  fi
 
   local -a plan
   mapfile -t plan < <(pipeline_select "${targets[@]}")
@@ -106,8 +129,9 @@ cmd_run() {
   mkdir -p "$RUN_DIR" && ln -sfn "$RUN_DIR" "$MIP_STATE_DIR/runs/latest"
   printf 'Pipeline: %d step(s), up to %d in parallel%s\n\n' "${#plan[@]}" "$MIP_JOBS" \
     "$([ "$MIP_INTERACTIVE" = 0 ] && echo ', non-interactive')"
-  local rc=0 env_before
+  local env_before
   env_before="$(env_digest)"
+  rc=0
   pipeline_run "${plan[@]}" || rc=$?
   shell_hint "$env_before"
   return "$rc"

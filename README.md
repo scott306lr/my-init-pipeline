@@ -9,7 +9,9 @@ fzf, lazygit, delta, btop, dust and the Hugging Face CLI, plus uv-managed Python
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/bootstrap.sh | bash
 ```
 
-This clones the repo to `~/my-init-pipeline` and runs `./init.sh run`. Safe to re-run:
+This clones the repo to `~/my-init-pipeline` and runs `./init.sh run`, which on a
+terminal first shows a checklist of Steps to pick from (Enter runs everything not
+yet done; `| bash -s -- -y` skips it). Safe to re-run:
 Steps that are already satisfied are skipped. Vocabulary is in [GLOSSARY.md](GLOSSARY.md).
 
 ## The Pipeline
@@ -48,7 +50,8 @@ unless a setting already answers the question (`hf-cache` with `HF_HUB_CACHE_DIR
 
 | Command | |
 |---|---|
-| `./init.sh run` | Run the whole Pipeline |
+| `./init.sh run` | On a terminal, pick Steps from a checklist, then run them (plus what they require). Steps with work to do start ticked; a ticked Step that is already done is re-run |
+| `./init.sh run -y` | Run the whole Pipeline without the checklist (also what happens without a terminal) |
 | `./init.sh run herdr` | Run `herdr` plus whatever it requires that isn't satisfied yet |
 | `./init.sh run --force codex` | Re-run a Step even though its Check passes |
 | `./init.sh run --upgrade` | Update every installed Tool with its own updater |
@@ -165,5 +168,10 @@ tests/admin.sh                            # admin/share-hf-cache.sh as root in u
 
 CI (`.github/workflows/ci.yml`, ubuntu-22.04) runs shellcheck, bats, a bootstrap
 dry run, the admin test and the non-interactive e2e.
+
+The checklist is [gum](https://github.com/charmbracelet/gum) `choose`, pinned and
+checksum-verified, fetched on first use into `~/.local/state/my-init-pipeline/bin`
+(it is the runner's helper, not a Tool on your PATH). If it can't be fetched, the
+Run warns and runs every Step.
 
 Design decisions: [docs/adr/](docs/adr/).

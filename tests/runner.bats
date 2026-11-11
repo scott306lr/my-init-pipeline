@@ -145,7 +145,7 @@ setup() { setup_pipeline; }
   command -v script >/dev/null || skip "util-linux script not available"
   step bg; step login; step needs-login login
   fake_action bg --sleep 2; fake_action login --interactive --sleep 1; fake_action needs-login
-  run script -qec "$ROOT/init.sh run -j 4" /dev/null
+  run script -qec "$ROOT/init.sh run -y -j 4" /dev/null
   [ "$status" -eq 0 ]
   grep -q 'start login tty=y' "$T/events"
   grep -q 'start bg tty=n' "$T/events"
@@ -277,4 +277,65 @@ setup() { setup_pipeline; }
   run mip run nope;        [ "$status" -ne 0 ]; [[ "$output" == *"unknown step 'nope'"* ]]
   run mip run -j 0;        [ "$status" -ne 0 ]
   run mip frobnicate;      [ "$status" -eq 2 ]
+}
+
+# ── Step picker (a terminal and no Steps named) ─────────────────────────────
+
+picker_pipeline() {
+  command -v script >/dev/null || skip "util-linux script not available"
+  step base; step a base; step b; step c
+  fake_action base; fake_action a; fake_action b; fake_action c
+}
+
+@test "picker: Steps with work to do start ticked; the ticked ones run with what they require" {
+  picker_pipeline
+  touch "$T/state/b"                       # b is done
+  fake_gum 0 a
+  run mip_tty run
+  [ "$status" -eq 0 ]
+  grep -qx -- '--no-limit' "$T/gum.args"
+  # --selected lists a, base and c (todo), not b (done).
+  sel="$(grep -A1 -x -- '--selected' "$T/gum.args" | tail -n 1)"
+  [[ "$sel" == *"base "* && "$sel" == *"a "* && "$sel" == *"c "* && "$sel" != *"b "* ]]
+  grep -q $'^b  *done .*\tb$' "$T/gum.args"
+  grep -q 'end base' "$T/events" && grep -q 'end a' "$T/events"
+  ! grep -q 'start c' "$T/events"
+}
+
+@test "picker: a ticked Step that is already done is re-run" {
+  picker_pipeline
+  touch "$T/state/b"
+  fake_gum 0 b
+  run mip_tty run
+  [ "$status" -eq 0 ]
+  grep -q 'start b' "$T/events"
+}
+
+@test "picker: cancelling runs nothing and exits 130; ticking nothing runs nothing" {
+  picker_pipeline
+  fake_gum 130
+  run mip_tty run
+  [ "$status" -eq 130 ] && [[ "$output" == *"Cancelled"* ]]
+  fake_gum 0
+  run mip_tty run
+  [ "$status" -eq 0 ] && [[ "$output" == *"No Steps selected"* ]]
+  [ ! -s "$T/events" ]
+}
+
+@test "picker: skipped with -y, named Steps, --upgrade, --dry-run, and without a terminal" {
+  picker_pipeline
+  fake_gum 0 c
+  mip_tty run -y >/dev/null;           [ ! -e "$T/gum.args" ]
+  mip_tty run b >/dev/null;            [ ! -e "$T/gum.args" ]
+  mip_tty run --upgrade >/dev/null;    [ ! -e "$T/gum.args" ]
+  mip_tty run --dry-run >/dev/null;    [ ! -e "$T/gum.args" ]
+  mip run </dev/null >/dev/null;       [ ! -e "$T/gum.args" ]
+}
+
+@test "picker: when gum is unavailable, warns and runs every Step" {
+  picker_pipeline
+  run mip_tty run                          # MIP_GUM points at nothing
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"could not show the Step picker"* ]]
+  grep -q 'end c' "$T/events"
 }

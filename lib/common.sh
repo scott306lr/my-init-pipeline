@@ -133,20 +133,20 @@ release_sha256() {
   curl -fsSL --retry 3 "$1" | awk -v f="$2" '$2 == f || $2 == "*" f { print $1; exit }'
 }
 
-# install_release_binary URL BIN [SHA256] — download a .tar.gz release asset,
-# verify it when a hash is given, and install the executable named BIN (found
-# anywhere in the archive) as ~/.local/bin/BIN.
+# install_release_binary URL BIN [SHA256] [DIR] — download a .tar.gz release
+# asset, verify it when a hash is given, and install the executable named BIN
+# (found anywhere in the archive) as DIR/BIN (default ~/.local/bin/BIN).
 install_release_binary() {
-  local url="$1" bin="$2" sha="${3:-}" tmp path rc=0
+  local url="$1" bin="$2" sha="${3:-}" dir="${4:-$HOME/.local/bin}" tmp path rc=0
   tmp="$(mktemp -d)"
-  mkdir -p "$tmp/x" "$HOME/.local/bin"
+  mkdir -p "$tmp/x" "$dir"
   {
     fetch "$url" "$tmp/asset.tar.gz" &&
       if [ -n "$sha" ]; then echo "$sha  $tmp/asset.tar.gz" | sha256sum -c -; else info "no published checksum for ${url##*/}"; fi &&
       tar -xzf "$tmp/asset.tar.gz" -C "$tmp/x" &&
       path="$(find "$tmp/x" -type f -name "$bin" -perm -u+x | head -n 1)" &&
       [ -n "$path" ] &&
-      install -m 755 "$path" "$HOME/.local/bin/$bin"
+      install -m 755 "$path" "$dir/$bin"
   } || rc=1
   rm -rf "$tmp"
   [ "$rc" = 0 ] || { warn "could not install $bin from $url"; return 1; }
