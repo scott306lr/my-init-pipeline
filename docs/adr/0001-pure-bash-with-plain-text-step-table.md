@@ -9,5 +9,5 @@ dependencies, and the table stays readable at a glance.
 
 ## Consequences
 
-- No nested data: an Action takes no per-Step arguments (shared logic goes in `lib/`).
+- No nested data: an Action takes no per-Step arguments (shared logic goes in `lib/`; ADR 0003 records the one exception).
 - If the runner outgrows bash, the table format is trivial to read from any language.

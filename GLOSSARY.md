@@ -22,3 +22,14 @@ _Avoid_: service, app, stage.
 **Note** — A message a Step leaves for the human, shown at the end of a Run. It covers follow-up work the Pipeline does not do itself, such as logging in to a Tool.
 
 **Tool** — A program the Pipeline puts on the server (claude, codex, herdr, gh, nvitop). It is installed by a Step, but it is not itself a Step.
+
+**Plan** — What a Run intends for each Step it selected, decided before that Step executes: run it, upgrade it, or skip it and why.
+
+**Result** — The word a Step ends a Run with: what happened to it, as opposed to what the Plan intended.
+
+**Cache folder** — The one folder that holds a user's Hugging Face downloads, models and datasets together. Each user has one in effect at a time.
+
+**Shared** — Said of a Cache folder that other users of the server can add their own downloads to, however that was arranged.
+_Avoid_: public, group folder.
+
+**Exported** — Said of a Cache folder that every user of the server gets as their default from their next login, including users who never run the Pipeline. A Cache folder can be Shared without being Exported.
