@@ -305,3 +305,30 @@ SH
   [ "$status" -ne 0 ]
   [[ "$output" == *"MANAGED_PYTHON_VERSIONS"* ]]
 }
+
+# fake_uv_bin — a uv on PATH that logs its arguments and UV_NO_MODIFY_PATH, and
+# an installer (file:// URL) that writes a receipt, as the real one does.
+fake_uv_bin() {
+  mkdir -p "$T/bin"
+  printf '#!/bin/sh\necho "uv $* nomod=$UV_NO_MODIFY_PATH" >>"%s/uv.calls"\n' "$T" >"$T/bin/uv"
+  chmod +x "$T/bin/uv"
+  printf '#!/bin/sh\necho "installer nomod=$UV_NO_MODIFY_PATH" >>"%s/uv.calls"\nmkdir -p "$HOME/.config/uv" && echo {} >"$HOME/.config/uv/uv-receipt.json"\n' "$T" >"$T/uv-install.sh"
+  export PATH="$T/bin:$PATH" UV_INSTALLER_URL="file://$T/uv-install.sh"
+}
+
+@test "uv: upgrade self-updates a standalone install, without touching shell profiles" {
+  fake_uv_bin
+  mkdir -p "$HOME/.config/uv"; echo {} >"$HOME/.config/uv/uv-receipt.json"
+  action uv-install upgrade
+  grep -qx 'uv self update nomod=1' "$T/uv.calls"
+  ! grep -q installer "$T/uv.calls"
+}
+
+@test "uv: upgrade reinstalls a uv with no install receipt, after which it self-updates" {
+  fake_uv_bin
+  action uv-install upgrade
+  grep -qx 'installer nomod=1' "$T/uv.calls"
+  ! grep -q 'self update' "$T/uv.calls"
+  action uv-install upgrade
+  grep -qx 'uv self update nomod=1' "$T/uv.calls"
+}
