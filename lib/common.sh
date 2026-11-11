@@ -33,8 +33,22 @@ hf_cache_root() {
   case "$1" in */hub) if [ "$2" = "${1%/hub}/datasets" ]; then printf '%s\n' "${1%/hub}"; fi ;; esac
 }
 
-# share_hf_cache [--check | --exported] DIR — admin/share-hf-cache.sh: share DIR
-# with every user (as its owner), or ask whether it is shared / exported.
+# hf_cache_in_effect — the Hugging Face cache folder already chosen, first found
+# of: the one env.sh records (the hf-cache Step's), the one exported for every
+# user (read fresh, so root's export from earlier in this Run counts), the
+# folder holding an HF_HUB_CACHE=<folder>/hub this shell has (an older export).
+# Nothing when none is.
+hf_cache_in_effect() {
+  local f
+  f="$(hf_cache_root "$(env_value HF_HUB_CACHE)" "$(env_value HF_DATASETS_CACHE)")"
+  [ -n "$f" ] || f="$(share_hf_cache --exported-folder)"
+  if [ -z "$f" ]; then case "${HF_HUB_CACHE:-}" in */hub) f="${HF_HUB_CACHE%/hub}" ;; esac; fi
+  if [ -n "$f" ]; then printf '%s\n' "$f"; fi
+}
+
+# share_hf_cache [--check | --exported] DIR | --exported-folder —
+# admin/share-hf-cache.sh: share DIR with every user (as its owner), ask whether
+# it is shared / exported, or print the folder exported for every user.
 share_hf_cache() { bash "$MIP_ROOT/admin/share-hf-cache.sh" "$@"; }
 
 # have CMD — true if CMD resolves on PATH.
@@ -93,6 +107,13 @@ add_env() {
 # remove_env VAR — drop VAR's export from the managed env file, if any.
 remove_env() {
   if [ -f "$MIP_ENV_FILE" ]; then sed -i "/^export $1=/d" "$MIP_ENV_FILE"; fi
+}
+
+# env_value VAR — the value env.sh exports for VAR (with $HOME expanded), or nothing.
+env_value() {
+  local v
+  v="$(sed -n "s/^export $1=\"\(.*\)\"\$/\1/p" "$MIP_ENV_FILE" 2>/dev/null | tail -n 1)"
+  printf '%s\n' "${v/#\$HOME/$HOME}"
 }
 
 # env_has_env VAR VALUE — true if add_env VAR VALUE is the recorded value.

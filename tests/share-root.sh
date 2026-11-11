@@ -12,6 +12,8 @@
 #     others, and a user who never ran anything can write to it;
 #   - the optional hf-export Step, named, makes that folder every user's cache
 #     with sudo;
+#   - a folder only root can prepare: hf-cache alone fails pointing to
+#     hf-export, and the two together (hf-export first) succeed;
 #   - init.sh refuses root on a real machine, not in a container.
 #
 #   tests/share-root.sh REPO_DIR    (as root)
@@ -96,6 +98,23 @@ login dave "/opt/mip/init.sh run hf-export </dev/null" >/tmp/run.out 2>&1 \
 grep -q 'hf-export *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-export did not run"; }
 [ "$(login carol 'echo $HF_HUB_CACHE $HF_DATASETS_CACHE')" = "/srv/team/hf/hub /srv/team/hf/datasets" ] \
   || fail "a new login does not get the exported cache folder"
+# A folder only root can prepare (lrspark: root made it root:root 755 and handed
+# over only hub/). hf-cache alone cannot add datasets/ and says to tick
+# hf-export; with hf-export in the same Run, root prepares the folder first.
+useradd -m frank; echo 'frank ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/frank
+mkdir -p /srv/rootown/hf/hub && chmod 755 /srv/rootown /srv/rootown/hf && chown frank /srv/rootown/hf/hub
+login frank "HF_CACHE_DIR=/srv/rootown/hf /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 \
+  && { cat /tmp/run.out; fail "hf-cache succeeded on a folder only root can prepare"; }
+grep -q 'tick hf-export' /home/frank/.local/state/my-init-pipeline/runs/latest/hf-cache.log \
+  || { cat /home/frank/.local/state/my-init-pipeline/runs/latest/hf-cache.log; fail "hf-cache did not point to hf-export"; }
+login frank "HF_CACHE_DIR=/srv/rootown/hf /opt/mip/init.sh run hf-export hf-cache </dev/null" >/tmp/run.out 2>&1 \
+  || { cat /tmp/run.out /home/frank/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-export + hf-cache failed"; }
+if ! grep -q 'hf-export *ran' /tmp/run.out || ! grep -q 'hf-cache *ran' /tmp/run.out; then cat /tmp/run.out; fail "not both ran"; fi
+[ "$(grep -n 'hf-export *ran' /tmp/run.out | cut -d: -f1)" -lt "$(grep -n 'hf-cache *ran' /tmp/run.out | cut -d: -f1)" ] \
+  || { cat /tmp/run.out; fail "hf-cache ran before hf-export"; }
+as carol 'mkdir /srv/rootown/hf/datasets/ds___f' || fail "the prepared folder is not shared"
+[ "$(login carol 'echo $HF_DATASETS_CACHE')" = /srv/rootown/hf/datasets ] || fail "the prepared folder is not exported"
+
 # Root: refused on a real machine, allowed in a container or CI job. An unknown
 # Step name shows which: the refusal comes before the Pipeline is read.
 /opt/mip/init.sh run no-such-step >/tmp/root.out 2>&1 && fail "init.sh accepted an unknown Step"

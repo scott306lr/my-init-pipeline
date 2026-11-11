@@ -7,6 +7,7 @@
 #   admin/share-hf-cache.sh DIR             share DIR (as its owner, or as root)
 #   admin/share-hf-cache.sh --check DIR     exit 0 if DIR is shared
 #   admin/share-hf-cache.sh --exported DIR  exit 0 if DIR's hub/ and datasets/ are exported system-wide
+#   admin/share-hf-cache.sh --exported-folder  print the folder exported system-wide, if any
 #   curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- DIR
 #
 # As DIR's owner (the hf-cache Step runs it so): creates DIR, DIR/hub and
@@ -30,6 +31,7 @@ set -euo pipefail
 # defines a function that is never called instead of running half a script.
 main() {
   local query="" root=0 dir p
+  if [ "${1:-}" = --exported-folder ]; then exported_folder; return; fi
   case "${1:-}" in --check | --exported) query="$1"; shift ;; esac
   if [ $# -ne 1 ]; then
     echo "usage: share-hf-cache.sh [--check | --exported] DIR" >&2
@@ -103,7 +105,19 @@ is_shared() {
   grep -qx 'other::rwx' <<<"$acl" && grep -qx 'default:other::rwx' <<<"$acl"
 }
 
-PROFILE=/etc/profile.d/hf-cache.sh
+PROFILE="${MIP_HF_PROFILE:-/etc/profile.d/hf-cache.sh}"   # override: tests
+
+# exported_folder — the folder whose hub/ and datasets/ PROFILE exports, or nothing.
+exported_folder() {
+  [ -f "$PROFILE" ] || return 0
+  (
+    # shellcheck disable=SC1090
+    . "$PROFILE"
+    case "${HF_HUB_CACHE:-}" in
+      */hub) if [ "${HF_DATASETS_CACHE:-}" = "${HF_HUB_CACHE%/hub}/datasets" ]; then printf '%s\n' "${HF_HUB_CACHE%/hub}"; fi ;;
+    esac
+  )
+}
 
 # profile_lines DIR — what PROFILE holds once DIR is exported.
 profile_lines() { printf 'export HF_HUB_CACHE=%q\nexport HF_DATASETS_CACHE=%q' "$1/hub" "$1/datasets"; }

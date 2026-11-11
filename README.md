@@ -37,8 +37,8 @@ git-identity    git-identity                   # user.name / user.email, if unse
 btop            btop-install     path-env
 dust            dust-install     path-env
 hf              hf-install       uv
-hf-cache        hf-cache         path-env      # interactive unless HF_CACHE_DIR (and, outside home, HF_CACHE_SHARED) is set
-hf-export       hf-export        hf-cache      # optional, sudo: the shared cache becomes every user's default
+hf-export       hf-export                      # optional, sudo: root prepares and shares the cache folder for every user
+hf-cache        hf-cache         path-env hf-export  # interactive unless HF_CACHE_DIR (and, outside home, HF_CACHE_SHARED) is set
 herdr           herdr-install    claude-config codex
 ```
 
@@ -159,10 +159,14 @@ folder and become everyone's too; a cache that is already shared is never
 emptied. Other users get the folder by running the `hf-cache` Step, which offers
 it once it is exported system-wide. Adding a user takes nothing.
 
-Making it every user's default, including users who don't run this Pipeline,
-needs root: tick the optional `hf-export` Step in the checklist, or run
-`./init.sh run hf-export`. It prints the sudo command, and takes the terminal
-when sudo needs your password (with passwordless sudo it runs without one).
+Root is needed to make the folder every user's default (including users who
+don't run this Pipeline), and to prepare a folder you can't write to yourself
+(say root created it). That is the optional `hf-export` Step: tick it in the
+checklist, or run `./init.sh run hf-export hf-cache`. It runs before `hf-cache`,
+asks for the folder (or takes `HF_CACHE_DIR`), prints the sudo command, and has
+root create the folder with `hub/` and `datasets/`, share it and export it;
+`hf-cache` then offers that folder. It takes the terminal when sudo needs your
+password (with passwordless sudo it runs without one).
 Never run `init.sh` itself with sudo: it would set up root's account instead of
 yours, so outside a container or CI job it refuses. The same root run also
 opens any parent folder others can't enter and installs `acl` when `setfacl` is

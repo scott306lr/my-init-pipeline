@@ -434,16 +434,33 @@ shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep
   [ "$status" -eq 1 ]
 }
 
-@test "hf-export: n/a only for a cache folder in your home; work to do before hf-cache ran, and until shared and exported" {
-  run env HF_HUB_CACHE= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
-  [ "$status" -eq 1 ]                        # fresh server: offered, hf-cache will record the folder
-  run env HF_HUB_CACHE="$HOME/hf/hub" HF_DATASETS_CACHE="$HOME/hf/datasets" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
-  [ "$status" -eq 2 ]
-  mkdir -p "$T/priv/hub" "$T/priv/datasets"
-  run env HF_HUB_CACHE="$T/priv/hub" HF_DATASETS_CACHE="$T/priv/datasets" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
-  [ "$status" -eq 1 ]                        # outside home, not shared: root shares and exports it
-  run env HF_HUB_CACHE="$T/priv/hub" HF_DATASETS_CACHE= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run
-  [ "$status" -ne 0 ] && [[ "$output" == *"run the hf-cache Step first"* ]]
+@test "hf-export: chooses its folder itself — HF_CACHE_DIR, else the one in effect, else the suggestion; n/a in your home" {
+  hfe() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" "$@"; }
+  run hfe check
+  [ "$status" -eq 1 ]                        # fresh server: the suggestion, offered before hf-cache ran
+  printf 'HF_CACHE_SUGGESTED=\n' >"$T/config.sh"   # blanked in config (an empty env value means the default)
+  run env MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  [ "$status" -eq 2 ]                        # no folder at all
+  run env HF_CACHE_DIR="$HOME/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  [ "$status" -eq 2 ]                        # a cache in your home is yours alone
+  run env HF_HUB_CACHE="$HOME/hf/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  [ "$status" -eq 2 ]                        # an older hub-only export counts as in effect
+  run env HF_CACHE_DIR="$HOME/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  [ "$status" -ne 0 ] && [[ "$output" == *"is in your home"* ]]
+  mkdir -p "$(dirname "$MIP_HF_PROFILE")"    # what root's earlier run exported
+  printf 'export HF_HUB_CACHE=%s/hub\nexport HF_DATASETS_CACHE=%s/datasets\n' "$T/sys" "$T/sys" >"$MIP_HF_PROFILE"
+  [ "$(bash "$ROOT/admin/share-hf-cache.sh" --exported-folder)" = "$T/sys" ]
+  mkdir -p "$T/sys"
+  run hfe check
+  [ "$status" -eq 1 ]                        # exported, but not shared yet
+}
+
+@test "hf-cache: the prompt defaults to the folder exported for every user, read fresh (as hf-export just left it)" {
+  mkdir -p "$(dirname "$MIP_HF_PROFILE")"
+  printf 'export HF_HUB_CACHE=%s/hub\nexport HF_DATASETS_CACHE=%s/datasets\n' "$T/sys" "$T/sys" >"$MIP_HF_PROFILE"
+  printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
+  MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  exports "$T/sys"
 }
 
 @test "hf-export: a terminal only when sudo needs a password; without one it never lets sudo prompt" {
@@ -467,7 +484,7 @@ shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep
   mkdir -p "$T/bin"
   printf '#!/bin/sh\necho "$*" >>"%s/sudo.calls"\nexit "${SUDO_RC:-0}"\n' "$T" >"$T/bin/sudo"; chmod +x "$T/bin/sudo"
   export PATH="$T/bin:$PATH"
-  on_tty() { script -qec "env SUDO_RC=$1 HF_HUB_CACHE=$T/srv/hub HF_DATASETS_CACHE=$T/srv/datasets bash $ROOT/lib/step.sh $ROOT/actions/hf-export.sh run" /dev/null; }
+  on_tty() { script -qec "env SUDO_RC=$1 HF_CACHE_DIR=$T/srv bash $ROOT/lib/step.sh $ROOT/actions/hf-export.sh run" /dev/null; }
   run on_tty 0
   [ "$status" -eq 0 ] && [[ "$output" == *"hf-export needs sudo: sudo bash $ROOT/admin/share-hf-cache.sh $T/srv"* ]]
   grep -qxF "bash $ROOT/admin/share-hf-cache.sh $T/srv" "$T/sudo.calls"

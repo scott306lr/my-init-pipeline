@@ -5,9 +5,12 @@
 #          datasets downloaded from the Hub, datasets/ for the datasets
 #          library's Arrow cache) but never holds the login token: HF_HOME
 #          stays at ~/.cache/huggingface. The Run asks for the folder, defaulting
-#          to the one already in effect (recorded here, or exported system-wide),
-#          else HF_CACHE_SUGGESTED if you can create it, else
-#          ~/.cache/huggingface; unless HF_CACHE_DIR is set. For a folder
+#          to the one already in effect (recorded here, else exported for every
+#          user, including by hf-export earlier in this Run, else an older
+#          HF_HUB_CACHE=<folder>/hub), else HF_CACHE_SUGGESTED if you can create
+#          it, else ~/.cache/huggingface; unless HF_CACHE_DIR is set. A folder
+#          only root can prepare is hf-export's job, which runs first when
+#          chosen. For a folder
 #          outside your home that is not shared yet, it also asks whether to
 #          share it with every user of the server, unless HF_CACHE_SHARED
 #          (yes/no) answers; sharing runs admin/share-hf-cache.sh as you, no
@@ -38,7 +41,7 @@ check() {
   root="$(recorded_root)"
   [ -n "$root" ] && [ -w "$root/hub" ] && [ -w "$root/datasets" ] &&
     { [ -z "$HF_CACHE_DIR" ] || [ "$root" = "$HF_CACHE_DIR" ]; } &&
-    [ -z "$(recorded HF_HOME)" ] && [ ! -L "$HF_HOME_DEFAULT" ] &&
+    [ -z "$(env_value HF_HOME)" ] && [ ! -L "$HF_HOME_DEFAULT" ] &&
     { [ "$HF_CACHE_SHARED" != yes ] || share_hf_cache --check "$root"; }
 }
 
@@ -47,8 +50,8 @@ run() {
   local -A from=()
   case "$share" in "" | yes | no) ;; *) die "HF_CACHE_SHARED must be yes, no or empty, got '$share'" ;; esac
   # Where the downloads are now, before anything changes.
-  from[hub]="$(recorded HF_HUB_CACHE)"
-  from[datasets]="$(recorded HF_DATASETS_CACHE)"
+  from[hub]="$(env_value HF_HUB_CACHE)"
+  from[datasets]="$(env_value HF_DATASETS_CACHE)"
   legacy="$(legacy_home)"
   if [ -n "$legacy" ]; then
     from[hub]="${from[hub]:-$legacy/hub}"
@@ -57,7 +60,7 @@ run() {
   from[hub]="${from[hub]:-$HF_HOME_DEFAULT/hub}"
   from[datasets]="${from[datasets]:-$HF_HOME_DEFAULT/datasets}"
   if [ -z "$root" ]; then
-    def="$(root_of "${HF_HUB_CACHE:-}")"   # env.sh is loaded: recorded wins over system-wide
+    def="$(hf_cache_in_effect)"
     if [ -z "$def" ] && [ -n "$legacy" ] && ! [ "$legacy" -ef "$HF_HOME_DEFAULT" ]; then def="$legacy"; fi
     def="${def:-$(suggestion)}"
     read -r -p "Hugging Face cache folder (holds hub/ and datasets/) [$def]: " root || true   # EOF: take the default
@@ -76,7 +79,7 @@ run() {
     fi
   fi
   if ! mkdir -p "$root/hub" "$root/datasets" || [ ! -w "$root/hub" ] || [ ! -w "$root/datasets" ]; then
-    die "cannot create or write to $root/hub and $root/datasets; if someone else made $root, ask them or root to run: admin/share-hf-cache.sh $root"
+    die "cannot create or write to $root/hub and $root/datasets: $root needs root first; tick hf-export too (or run: ./init.sh run hf-export hf-cache), or ask an admin to run: admin/share-hf-cache.sh $root"
   fi
   for kind in hub datasets; do
     src="${from[$kind]}"
@@ -179,23 +182,13 @@ suggestion() {
 }
 
 # recorded_root — the cache folder env.sh records, or nothing.
-recorded_root() { hf_cache_root "$(recorded HF_HUB_CACHE)" "$(recorded HF_DATASETS_CACHE)"; }
-
-# root_of HUB — the folder holding HUB when HUB ends in /hub, else nothing.
-root_of() { case "$1" in */hub) printf '%s\n' "${1%/hub}" ;; esac; }
-
-# recorded VAR — the value env.sh exports for VAR (with $HOME expanded), or nothing.
-recorded() {
-  local v
-  v="$(sed -n "s/^export $1=\"\(.*\)\"\$/\1/p" "$MIP_ENV_FILE" 2>/dev/null | tail -n 1)"
-  printf '%s\n' "${v/#\$HOME/$HOME}"
-}
+recorded_root() { hf_cache_root "$(env_value HF_HUB_CACHE)" "$(env_value HF_DATASETS_CACHE)"; }
 
 # legacy_home — the relocated HF_HOME the former hf-home Step left (its export,
 # else the target of the ~/.cache/huggingface symlink), or nothing.
 legacy_home() {
   local d
-  d="$(recorded HF_HOME)"
+  d="$(env_value HF_HOME)"
   if [ -z "$d" ] && [ -L "$HF_HOME_DEFAULT" ]; then d="$(readlink -f "$HF_HOME_DEFAULT")"; fi
   if [ -n "$d" ] || [ -L "$HF_HOME_DEFAULT" ]; then printf '%s\n' "${d:-$HF_HOME_DEFAULT}"; fi
 }
