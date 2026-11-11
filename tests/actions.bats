@@ -488,3 +488,14 @@ shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep
   run env CODEX_HOME="$T/codex-home" bash "$ROOT/lib/step.sh" "$ROOT/actions/codex-install.sh" check
   [ "$status" -eq 0 ]                        # CODEX_HOME is honoured
 }
+
+@test "hf-cache: downloads moved into a group-shared folder (setgid, group-writable, no ACL) get its group and group write" {
+  mkdir -p "$T/grp/hub" "$T/grp/datasets" "$HOME/.cache/huggingface/datasets/ds___y" "$HOME/.cache/huggingface/hub/blobs/12"
+  chmod 2775 "$T/grp" "$T/grp/hub" "$T/grp/datasets"
+  echo a >"$HOME/.cache/huggingface/datasets/ds___y/f"; chmod 600 "$HOME/.cache/huggingface/datasets/ds___y/f"
+  echo w >"$HOME/.cache/huggingface/hub/blobs/12/1234"; chmod 444 "$HOME/.cache/huggingface/hub/blobs/12/1234"
+  HF_CACHE_DIR="$T/grp" HF_CACHE_SHARED=no action hf-cache run </dev/null
+  [ "$(stat -c %a "$T/grp/datasets/ds___y/f")" = 660 ]
+  [ -g "$T/grp/datasets/ds___y" ]
+  [ "$(stat -c %a "$T/grp/hub/blobs/12/1234")" = 444 ]   # blob payloads stay read-only
+}

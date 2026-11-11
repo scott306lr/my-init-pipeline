@@ -11,11 +11,14 @@
 #          outside your home that is not shared yet, it also asks whether to
 #          share it with every user of the server, unless HF_CACHE_SHARED
 #          (yes/no) answers; sharing runs admin/share-hf-cache.sh as you, no
-#          sudo. With both answered the Step runs without a terminal.
+#          sudo. A folder someone else owns is used as its owner shared it
+#          (an ACL, or a setgid group you belong to), and nothing is asked.
+#          With both answered the Step runs without a terminal.
 #          Re-pointing moves your downloads: what the previous hub/ and datasets/
 #          caches hold (the recorded ones, else ~/.cache/huggingface's) is merged
 #          into the new folder, keeping the new folder's copy where both have an
-#          entry, then shared again if the folder is shared. A shared previous
+#          entry, then shared again if the folder is shared (its ACL, or its
+#          setgid group and group write). A shared previous
 #          cache is never emptied: other users' downloads live there. Moving
 #          across disks copies, which takes a while for big models; don't
 #          re-point while a download runs. An HF_HOME export or
@@ -99,23 +102,41 @@ note() {
   fi
 }
 
-# move_downloads SRC DST — move what SRC holds into DST, unless SRC is shared
-# (other users' downloads live there; then it is only reported).
+# move_downloads SRC DST — move what SRC holds into DST, if SRC is a private
+# cache of yours. A shared one (an ACL, or a setgid group), or one you don't
+# own, holds other users' downloads: then it is only reported.
 move_downloads() {
   local src="$1" dst="$2" left
-  if share_hf_cache --check "$src"; then
+  if [ ! -O "$src" ] || share_hf_cache --check "$src" || group_shared "$src"; then
     info "$src is shared with other users, so its downloads stay there"
     return
   fi
   info "moving $src into $dst ($(du -sh "$src" 2>/dev/null | cut -f1); across disks this copies)"
   shopt -s nullglob dotglob
   move_into "$src" "$dst"
+  join_group "$dst"
   find "$src" -depth -type d -empty -delete 2>/dev/null || true
   if [ -e "$src" ]; then
     left="$(find "$src" ! -type d | wc -l)"
     warn "$left entries were already in $dst and stay behind in $src; delete them when no longer needed"
   fi
 }
+
+# join_group DST — in a folder shared through its group (setgid and group
+# writable, no ACL), give your entries that group and group write, as if they
+# had been created there. Blob payloads stay read-only. An ACL-shared folder is
+# left to share_hf_cache.
+join_group() {
+  local dst="$1" grp
+  if share_hf_cache --check "$dst" || ! group_shared "$dst"; then return 0; fi
+  grp="$(stat -c %G "$dst")"
+  find "$dst" -user "$(id -u)" ! -group "$grp" -exec chgrp -h "$grp" {} +
+  find "$dst" -user "$(id -u)" -type d -exec chmod g+rwxs {} +
+  find "$dst" -user "$(id -u)" -type f ! -path '*/blobs/*' -exec chmod g+rw {} +
+}
+
+# group_shared DIR — DIR hands its group down (setgid) and the group may write.
+group_shared() { [ -g "$1" ] && [ "$(stat -c %A "$1" | cut -c 6)" = w ]; }
 
 # move_into SRC DST — merge SRC's entries into DST. A directory on both sides is
 # merged; any other entry already in DST is kept there and left in SRC. Hub
@@ -133,8 +154,12 @@ move_into() {
   done
 }
 
-# should_ask_to_share DIR — DIR lies outside your home and is not shared yet.
-should_ask_to_share() { ! in_home "$1" && ! share_hf_cache --check "$1"; }
+# should_ask_to_share DIR — DIR lies outside your home, is yours (or will be,
+# once created) and is not shared yet. Someone else's folder follows its
+# owner's policy, say a group with the setgid bit: it is used as it is.
+should_ask_to_share() {
+  ! in_home "$1" && { [ ! -e "$1" ] || [ -O "$1" ]; } && ! share_hf_cache --check "$1"
+}
 
 # suggestion — the folder to offer when none is in effect: HF_CACHE_SUGGESTED
 # if you can create or write it, else HF's default (your downloads move along).

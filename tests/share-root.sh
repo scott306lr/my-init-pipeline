@@ -62,6 +62,24 @@ as carol 'echo c >>/srv/team/hf/hub/models--y/f && mkdir /srv/team/hf/hub/models
 as carol 'echo c >>/srv/team/hf/hub/models--z/f && echo c >>/srv/team/hf/datasets/ds___z/f' || fail "dave's moved downloads are not writable by others"
 [ ! -e /home/dave/.cache/huggingface/hub/models--z ] || fail "dave's downloads were not moved"
 
+# A folder someone else shares through a setgid group, as an admin might have
+# set it up (spark1): a member uses it as it is (no question, no share script)
+# and their moved downloads join the group, so other members can update them.
+useradd -m erin; groupadd team; usermod -aG team erin; usermod -aG team carol
+mkdir -p /srv/grp/hf/hub /srv/grp/hf/datasets && chgrp -R team /srv/grp && chmod -R 2775 /srv/grp
+as erin 'mkdir -p ~/.cache/huggingface/datasets/ds___g && echo g >~/.cache/huggingface/datasets/ds___g/f'
+login erin "HF_CACHE_DIR=/srv/grp/hf /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 \
+  || { cat /tmp/run.out /home/erin/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-cache failed on a group-shared folder"; }
+grep -q 'hf-cache *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-cache did not run on a group-shared folder"; }
+[ "$(stat -c %G /srv/grp/hf/datasets/ds___g/f)" = team ] || fail "moved download did not join the folder's group"
+as carol 'echo c >>/srv/grp/hf/datasets/ds___g/f' || fail "another member cannot update a moved download"
+getfacl -p /srv/grp/hf | grep -q '^default:' && fail "a folder someone else owns got an ACL"
+# Leaving it again: other members' downloads stay.
+as carol 'mkdir -p /srv/grp/hf/hub/models--c && echo c >/srv/grp/hf/hub/models--c/f'
+login erin "HF_CACHE_DIR=/home/erin/hf /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 \
+  || { cat /tmp/run.out; fail "could not point erin at a private folder"; }
+[ -e /srv/grp/hf/hub/models--c/f ] || fail "leaving a group-shared folder took another member's downloads"
+
 # The optional hf-export Step, named (tests/runner.bats covers skipping it when
 # not chosen). dave has passwordless sudo, so it runs without a terminal.
 command -v sudo >/dev/null || { apt-get install -y -qq sudo >/dev/null 2>&1 || apt-get update -qq && apt-get install -y -qq sudo >/dev/null; }
