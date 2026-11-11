@@ -43,8 +43,9 @@ as alice 'mkdir -p "$HF_DATASETS_CACHE/ds___y" && echo a >"$HF_DATASETS_CACHE/ds
 as bob 'echo b >>"$HF_DATASETS_CACHE/ds___y/data.arrow"' || fail "bob cannot update alice's datasets cache entry"
 chmod 444 /srv/locked/hf/hub/models--x/blobs/g
 bash /opt/mip/admin/share-hf-cache.sh /srv/locked/hf >/dev/null
-[ "$(grep -c '^HF_HUB_CACHE=' /etc/environment)" = 1 ] && [ "$(grep -c '^HF_DATASETS_CACHE=' /etc/environment)" = 1 ] \
-  || fail "re-run stacked /etc/environment"
+if [ "$(grep -c '^HF_HUB_CACHE=' /etc/environment)" != 1 ] || [ "$(grep -c '^HF_DATASETS_CACHE=' /etc/environment)" != 1 ]; then
+  fail "re-run stacked /etc/environment"
+fi
 [ "$(stat -c %a /srv/locked/hf/hub/models--x/blobs/g)" = 444 ] || fail "a re-run made a blob writable"
 bash /opt/mip/admin/share-hf-cache.sh relative 2>/dev/null && fail "a relative DIR was accepted"
 
