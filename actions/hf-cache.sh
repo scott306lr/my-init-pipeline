@@ -31,26 +31,37 @@
 #          datasets/, move back into a real ~/.cache/huggingface, and that
 #          target becomes the prompt's default.
 
+# shellcheck source=lib/hf-cache.sh
+. "$MIP_ROOT/lib/hf-cache.sh"
+
 HF_HOME_DEFAULT="$HOME/.cache/huggingface"
 # The two caches in a cache folder, and the variable each is exported as.
 declare -A CACHE_VAR=([hub]=HF_HUB_CACHE [datasets]=HF_DATASETS_CACHE)
 
 interactive() {
-  [ -z "$HF_CACHE_DIR" ] || { [ -z "$HF_CACHE_SHARED" ] && should_ask_to_share "$HF_CACHE_DIR"; }
+  [ -n "$HF_CACHE_DIR" ] || return 0
+  [ -z "$HF_CACHE_SHARED" ] || return 1
+  hf_cache_state "$HF_CACHE_DIR"
+  should_ask_to_share
 }
 
 check() {
-  local root
+  local root want
   root="$(hf_cache_recorded)"
-  [ -n "$root" ] && writable_caches "$root" &&
-    { [ -z "$HF_CACHE_DIR" ] || [ "$root" = "$(folder_path "$HF_CACHE_DIR")" ]; } &&
+  [ -n "$root" ] || return 1
+  if [ -n "$HF_CACHE_DIR" ]; then
+    want="$(hf_cache_folder "$HF_CACHE_DIR")" || return 1
+    [ "$root" = "$want" ] || return 1
+  fi
+  hf_cache_state "$root"
+  [ "${HF_STATE[writable]}" = yes ] &&
     [ -z "$(env_value HF_HOME)" ] && [ ! -L "$HF_HOME_DEFAULT" ] &&
-    { [ "$HF_CACHE_SHARED" != yes ] || share_hf_cache --check "$root"; }
+    { [ "$HF_CACHE_SHARED" != yes ] || [ "${HF_STATE[shared]}" != none ]; }
 }
 
 run() {
-  local root="$HF_CACHE_DIR" legacy def answer share="$HF_CACHE_SHARED" kind src
-  local -A from=()
+  local root legacy answer share="$HF_CACHE_SHARED" kind
+  local -A from=() to=()
   case "$share" in "" | yes | no) ;; *) die "HF_CACHE_SHARED must be yes, no or empty, got '$share'" ;; esac
   # Where the downloads are now, before anything changes.
   legacy="$(legacy_home)"
@@ -59,15 +70,14 @@ run() {
     if [ -z "${from[$kind]}" ] && [ -n "$legacy" ]; then from[$kind]="$legacy/$kind"; fi
     from[$kind]="${from[$kind]:-$HF_HOME_DEFAULT/$kind}"
   done
-  if [ -n "$root" ]; then
-    root="$(folder_path "$root")"
-  else
-    def="$(hf_cache_in_effect)"
-    if [ -z "$def" ] && [ -n "$legacy" ] && ! [ "$legacy" -ef "$HF_HOME_DEFAULT" ]; then def="$legacy"; fi
-    root="$(ask_folder "Hugging Face cache folder (holds hub/ and datasets/)" "${def:-$(suggestion)}")"
+  root="$(hf_cache_resolve)" || return 1
+  if [ -z "$HF_CACHE_DIR" ]; then
+    if [ -z "$root" ] && [ -n "$legacy" ] && ! [ "$legacy" -ef "$HF_HOME_DEFAULT" ]; then root="$legacy"; fi
+    root="$(hf_ask_folder "Hugging Face cache folder (holds hub/ and datasets/)" "${root:-$(suggestion)}")" || return 1
   fi
-  [ -n "$legacy" ] && restore_home "$legacy"
-  if should_ask_to_share "$root" && [ -z "$share" ]; then
+  if [ -n "$legacy" ]; then restore_home "$legacy"; fi
+  hf_cache_state "$root"
+  if should_ask_to_share && [ -z "$share" ]; then
     # Enter shares; no answer at all (EOF) never does.
     if read -r -p "Share $root with every user of this server? [Y/n]: " answer; then
       case "$answer" in [nN]*) share=no ;; *) share=yes ;; esac
@@ -75,21 +85,15 @@ run() {
       share=no
     fi
   fi
-  local -a caches=()
-  for kind in "${!CACHE_VAR[@]}"; do caches+=("$root/$kind"); done
-  if ! mkdir -p "${caches[@]}" || ! writable_caches "$root"; then
+  for kind in "${!CACHE_VAR[@]}"; do to[$kind]="${HF_STATE[$kind]}"; done
+  if [ "${HF_STATE[shared]}" != none ]; then share=yes; fi   # a shared folder stays shared
+  if mkdir -p "${to[@]}"; then hf_cache_state "$root"; fi
+  if [ "${HF_STATE[writable]}" != yes ]; then
     die "cannot create or write to $root/hub and $root/datasets: $root needs root first; tick hf-export too (or run: ./init.sh run hf-export hf-cache), or ask an admin to run: admin/share-hf-cache.sh $root"
   fi
-  for kind in "${!CACHE_VAR[@]}"; do
-    src="${from[$kind]}"
-    if [ -d "$src" ] && [ -n "$(ls -A "$src")" ] && ! [ "$src" -ef "$root/$kind" ]; then
-      move_downloads "$src" "$root/$kind"
-    fi
-  done
-  # Sharing last, so it also covers whatever was just moved in.
-  if [ "$share" = yes ] || share_hf_cache --check "$root"; then share_hf_cache "$root"; fi
-  for kind in "${!CACHE_VAR[@]}"; do add_env "${CACHE_VAR[$kind]}" "${root/#$HOME/\$HOME}/$kind"; done
-  info "HF_HUB_CACHE = $root/hub, HF_DATASETS_CACHE = $root/datasets"
+  move_then_share "$root" "$share"
+  for kind in "${!CACHE_VAR[@]}"; do add_env "${CACHE_VAR[$kind]}" "${to[$kind]/#$HOME/\$HOME}"; done
+  info "HF_HUB_CACHE = ${to[hub]}, HF_DATASETS_CACHE = ${to[datasets]}"
 }
 
 note() {
@@ -98,9 +102,31 @@ note() {
   # The runner inherits the shell that started it, so a stale HF_HOME shows here.
   if [ -n "${HF_HOME:-}" ]; then echo "HF_HOME is still set in this shell: run 'unset HF_HOME' or open a new terminal"; fi
   # Exporting it for users who never run this Pipeline is the optional hf-export Step.
-  if [ -n "$root" ] && share_hf_cache --check "$root" && ! share_hf_cache --exported "$root"; then
+  [ -n "$root" ] || return 0
+  hf_cache_state "$root"
+  if [ "${HF_STATE[shared]}" != none ] && [ "${HF_STATE[exported]}" != yes ]; then
     echo "$root is shared; to make it every user's default (needs sudo): ./init.sh run hf-export"
   fi
+}
+
+# should_ask_to_share — the folder HF_STATE describes lies outside your home,
+# is yours (or will be, once created) and is not shared in any way yet. A
+# shared folder, or someone else's, is used as its owner set it up.
+should_ask_to_share() { [ "${HF_STATE[home]}" = no ] && hf_cache_mine_and_private; }
+
+# move_then_share ROOT SHARE — move your downloads from the caller's from[kind]
+# into its to[kind], then share ROOT when SHARE is yes. The one order that
+# works: sharing covers the entries you own in ROOT at that moment, so it has
+# to come after whatever is moved in.
+move_then_share() {
+  local kind src
+  for kind in "${!CACHE_VAR[@]}"; do
+    src="${from[$kind]}"
+    if [ -d "$src" ] && [ -n "$(ls -A "$src")" ] && ! [ "$src" -ef "${to[$kind]}" ]; then
+      move_downloads "$src" "${to[$kind]}"
+    fi
+  done
+  if [ "$2" = yes ]; then hf_admin "$1"; fi
 }
 
 # move_downloads SRC DST — move what SRC holds into DST, if SRC is a private
@@ -108,7 +134,8 @@ note() {
 # own, holds other users' downloads: then it is only reported.
 move_downloads() {
   local src="$1" dst="$2" left
-  if [ ! -O "$src" ] || share_hf_cache --check "$src"; then
+  hf_cache_state "$src"
+  if ! hf_cache_mine_and_private; then
     info "$src is shared with other users, so its downloads stay there"
     return
   fi
@@ -138,13 +165,6 @@ move_into() {
   done
 }
 
-# should_ask_to_share DIR — DIR lies outside your home, is yours (or will be,
-# once created) and is not shared in any way yet. A shared folder, or someone
-# else's, is used as its owner set it up.
-should_ask_to_share() {
-  ! in_home "$1" && { [ ! -e "$1" ] || [ -O "$1" ]; } && ! share_hf_cache --check "$1"
-}
-
 # suggestion — the folder to offer when none is in effect: HF_CACHE_SUGGESTED
 # if you can create or write it, else HF's default (your downloads move along).
 suggestion() {
@@ -154,12 +174,6 @@ suggestion() {
     if [ -d "$p" ] && [ -w "$p" ]; then echo "$HF_CACHE_SUGGESTED"; return; fi
   fi
   echo "$HF_HOME_DEFAULT"
-}
-
-# writable_caches ROOT — you can write to both caches in ROOT.
-writable_caches() {
-  local kind
-  for kind in "${!CACHE_VAR[@]}"; do [ -w "$1/$kind" ] || return 1; done
 }
 
 # legacy_home — the relocated HF_HOME the former hf-home Step left (its export,

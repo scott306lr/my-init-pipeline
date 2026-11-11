@@ -32,7 +32,10 @@ mkdir -p /srv/locked && chmod 700 /srv/locked
 
 echo 'export HF_HUB_CACHE=/old' >/etc/profile.d/hf-hub-cache.sh   # the export's name before datasets/
 bash /opt/mip/admin/share-hf-cache.sh /srv/locked/hf
-bash /opt/mip/admin/share-hf-cache.sh --check /srv/locked/hf || fail "--check fails after sharing"
+state="$(bash /opt/mip/admin/share-hf-cache.sh --state /srv/locked/hf/)"
+for want in shared=acl exported=yes folder=/srv/locked/hf; do
+  grep -qx "$want" <<<"$state" || { echo "$state"; fail "--state lacks $want after root's run"; }
+done
 [ ! -e /etc/profile.d/hf-hub-cache.sh ] || fail "the old export file was left behind"
 as alice 'mkdir -p "$HF_HUB_CACHE/models--x/refs" "$HF_HUB_CACHE/models--x/blobs" && echo a >"$HF_HUB_CACHE/models--x/refs/main"' \
   || fail "alice cannot write the cache"

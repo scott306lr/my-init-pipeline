@@ -386,7 +386,7 @@ fake_uv_bin() {
 
 # Sharing (no root needed: you own the folder).
 share_cfg() { printf 'HF_CACHE_DIR=%s\nHF_CACHE_SHARED=%s\n' "$1" "$2" >"$T/config.sh"; export MIP_USER_CONFIG="$T/config.sh"; }
-shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep -qx 'default:other::rwx'; }
+shared_dir() { [ "$(hf_state "$1" shared)" = acl ]; }
 
 @test "hf-cache: HF_CACHE_SHARED=yes shares a folder outside home (hub/ and datasets/) with everyone; the Check requires it" {
   command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
@@ -447,8 +447,7 @@ shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep
   [ "$status" -eq 2 ]                        # an older hub-only export counts as in effect
   run env HF_CACHE_DIR="$HOME/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
   [ "$status" -ne 0 ] && [[ "$output" == *"is in your home"* ]]
-  mkdir -p "$(dirname "$MIP_HF_PROFILE")"    # what root's earlier run exported
-  printf 'export HF_HUB_CACHE=%s/hub\nexport HF_DATASETS_CACHE=%s/datasets\n' "$T/sys" "$T/sys" >"$MIP_HF_PROFILE"
+  export_for_everyone "$T/sys"               # what root's earlier run exported
   [ "$(bash "$ROOT/admin/share-hf-cache.sh" --exported-folder)" = "$T/sys" ]
   mkdir -p "$T/sys"
   run hfe check
@@ -456,8 +455,7 @@ shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep
 }
 
 @test "hf-cache: the prompt defaults to the folder exported for every user, read fresh (as hf-export just left it)" {
-  mkdir -p "$(dirname "$MIP_HF_PROFILE")"
-  printf 'export HF_HUB_CACHE=%s/hub\nexport HF_DATASETS_CACHE=%s/datasets\n' "$T/sys" "$T/sys" >"$MIP_HF_PROFILE"
+  export_for_everyone "$T/sys"
   printf 'HF_CACHE_DIR=\nHF_CACHE_SHARED=no\n' >"$T/config.sh"
   MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
   exports "$T/sys"
@@ -536,7 +534,6 @@ shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep
 
 @test "hf-cache: a group-shared folder you own counts as shared — nothing to ask, no ACL added" {
   mkdir -p "$T/gown"; chmod 2775 "$T/gown"
-  bash "$ROOT/admin/share-hf-cache.sh" --check "$T/gown"
   run env HF_CACHE_DIR="$T/gown" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" interactive
   [ "$status" -eq 1 ]
   HF_CACHE_DIR="$T/gown" action hf-cache run </dev/null

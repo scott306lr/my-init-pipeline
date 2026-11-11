@@ -19,25 +19,29 @@
 #          it on a terminal" instead of hanging. Without sudo it fails with the
 #          command to give an admin.
 
+# shellcheck source=lib/hf-cache.sh
+. "$MIP_ROOT/lib/hf-cache.sh"
+
 # A terminal only when sudo would ask for a password.
 interactive() { ! sudo -n true 2>/dev/null; }
 
 check() {
   local folder
-  folder="$(default_folder)"
+  folder="$(default_folder)" || return 1
   [ -n "$folder" ] || return 2
-  if in_home "$folder"; then return 2; fi   # a cache in your home is yours alone
-  share_hf_cache --check "$folder" && share_hf_cache --exported "$folder"
+  hf_cache_state "$folder"
+  [ "${HF_STATE[home]}" = no ] || return 2   # a cache in your home is yours alone
+  [ "${HF_STATE[shared]}" != none ] && [ "${HF_STATE[exported]}" = yes ]
 }
 
 run() {
   local folder
-  if [ -n "$HF_CACHE_DIR" ]; then
-    folder="$(folder_path "$HF_CACHE_DIR")"
-  else
-    folder="$(ask_folder "Folder to share with every user of this server (holds hub/ and datasets/)" "$(default_folder)")"
+  folder="$(default_folder)" || return 1
+  if [ -z "$HF_CACHE_DIR" ]; then
+    folder="$(hf_ask_folder "Folder to share with every user of this server (holds hub/ and datasets/)" "$folder")" || return 1
   fi
-  if in_home "$folder"; then die "$folder is in your home: a cache there is yours alone, so there is nothing to share"; fi
+  hf_cache_state "$folder"
+  if [ "${HF_STATE[home]}" = yes ]; then die "$folder is in your home: a cache there is yours alone, so there is nothing to share"; fi
   local -a cmd=(sudo bash "$MIP_ROOT/admin/share-hf-cache.sh" "$folder")
   if [ ! -t 0 ]; then cmd=(sudo -n "${cmd[@]:1}"); fi   # no terminal: sudo must not prompt
   warn "hf-export needs sudo: ${cmd[*]}"
@@ -46,13 +50,12 @@ run() {
   die "sudo failed; ask an admin to run: curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- $folder"
 }
 
-note() { echo "Every user gets HF_HUB_CACHE and HF_DATASETS_CACHE in $(share_hf_cache --exported-folder) from their next login"; }
+note() { echo "Every user gets HF_HUB_CACHE and HF_DATASETS_CACHE in $(hf_admin --exported-folder) from their next login"; }
 
-# default_folder — HF_CACHE_DIR, else the cache folder in effect, else
+# default_folder — the cache folder already decided (hf_cache_resolve), else
 # HF_CACHE_SUGGESTED (root can create it wherever it is).
 default_folder() {
-  local f=""
-  if [ -n "${HF_CACHE_DIR:-}" ]; then f="$(folder_path "$HF_CACHE_DIR")"; fi
-  [ -n "$f" ] || f="$(hf_cache_in_effect)"
+  local f
+  f="$(hf_cache_resolve)" || return 1
   printf '%s\n' "${f:-${HF_CACHE_SUGGESTED:-}}"
 }

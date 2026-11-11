@@ -5,10 +5,26 @@
 # cache), as HF_HOME would, but never the login token.
 #
 #   admin/share-hf-cache.sh DIR             share DIR (as its owner, or as root)
-#   admin/share-hf-cache.sh --check DIR     exit 0 if DIR is shared (an ACL, or a setgid group)
-#   admin/share-hf-cache.sh --exported DIR  exit 0 if DIR's hub/ and datasets/ are exported system-wide
-#   admin/share-hf-cache.sh --exported-folder  print the folder exported system-wide, if any
 #   curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- DIR
+#
+# This script owns what a cache folder is (docs/adr/0003): its layout, which
+# paths are valid, and whether it is shared or exported. The hf-cache and
+# hf-export Steps ask it, as the caller, without changing anything:
+#
+#   admin/share-hf-cache.sh --state DIR     print DIR's state, one key=value per line:
+#                                             folder=DIR as a cache folder: ~ expanded, no trailing /
+#                                             hub=, datasets=  the two caches in it
+#                                             home=yes|no              DIR is, or lies in, your home
+#                                             owner=me|other|none      none: DIR does not exist
+#                                             shared=acl|group|none    how others may add entries
+#                                             writable=yes|no          you can write both caches
+#                                             exported=yes|no          every user's login gets it
+#   admin/share-hf-cache.sh --folder-of HUB [DATASETS]
+#                                           print the cache folder whose hub/ is HUB (and whose
+#                                           datasets/ is DATASETS, when given); nothing if none
+#   admin/share-hf-cache.sh --exported-folder  print the folder exported system-wide, if any
+#
+# DIR must be an absolute path other than /; anything else exits 1.
 #
 # As DIR's owner (the hf-cache Step runs it so): creates DIR, DIR/hub and
 # DIR/datasets if missing, and lets every user read, add and replace entries,
@@ -32,19 +48,15 @@ set -euo pipefail
 # Everything lives in main, called on the last line: a truncated download
 # defines a function that is never called instead of running half a script.
 main() {
-  local query="" root=0 dir p
-  if [ "${1:-}" = --exported-folder ]; then exported_folder; return; fi
-  case "${1:-}" in --check | --exported) query="$1"; shift ;; esac
-  if [ $# -ne 1 ]; then
-    echo "usage: share-hf-cache.sh [--check | --exported] DIR | --exported-folder" >&2
-    exit 2
-  fi
-  dir="${1%/}"
-  case "$dir" in /?*) ;; *) die "DIR must be an absolute path: $dir" ;; esac
-  case "$query" in
-    --check) [ "$(how_shared "$dir")" != none ]; return ;;
-    --exported) [ "$(cat "$PROFILE" 2>/dev/null)" = "$(profile_lines "$dir")" ]; return ;;
+  local root=0 dir p
+  case "${1:-}" in
+    --exported-folder) [ $# -eq 1 ] || usage; exported_folder; return ;;
+    --folder-of) [ $# -eq 2 ] || [ $# -eq 3 ] || usage; folder_of "${@:2}"; return ;;
+    --state) [ $# -eq 2 ] || usage; dir="$(cache_folder "$2")"; state "$dir"; return ;;
+    -*) usage ;;
   esac
+  [ $# -eq 1 ] || usage
+  dir="$(cache_folder "$1")"
   if [ "$(id -u)" = 0 ]; then root=1; fi
 
   if [ ! -d "$dir" ]; then
@@ -97,12 +109,12 @@ main() {
     profile_lines "$dir" >"$PROFILE"
     chmod 644 "$PROFILE"
     rm -f /etc/profile.d/hf-hub-cache.sh   # its name before datasets/ was shared too
-    sed -i -e '/^HF_HUB_CACHE=/d' -e '/^HF_DATASETS_CACHE=/d' /etc/environment
-    printf 'HF_HUB_CACHE=%s\nHF_DATASETS_CACHE=%s\n' "$dir/hub" "$dir/datasets" >>/etc/environment
+    sed -i -e '/^HF_HUB_CACHE=/d' -e '/^HF_DATASETS_CACHE=/d' "$ENVIRONMENT"
+    environment_lines "$dir" >>"$ENVIRONMENT"
     echo "HF_HUB_CACHE=$dir/hub and HF_DATASETS_CACHE=$dir/datasets for every user from their next login"
   fi
   echo "$dir is shared with every user of this server"
-  if [ "$root" = 0 ] && ! main --exported "$dir"; then
+  if [ "$root" = 0 ] && ! is_exported "$dir"; then
     echo "For users who don't run my-init-pipeline, root can export it for everyone: sudo bash $0 $dir"
   fi
 }
@@ -137,7 +149,38 @@ join_group() {
   find "$dir" -user "$me" -type f ! -path '*/blobs/*' -exec chmod g+rw {} +
 }
 
-PROFILE="${MIP_HF_PROFILE:-/etc/profile.d/hf-cache.sh}"   # override: tests
+# Where an export for every user lives: login shells read PROFILE, and
+# pam_env reads ENVIRONMENT for sessions that start no login shell.
+PROFILE="${MIP_HF_PROFILE:-/etc/profile.d/hf-cache.sh}"       # override: tests
+ENVIRONMENT="${MIP_HF_ENVIRONMENT:-/etc/environment}"         # override: tests
+
+# cache_folder PATH — PATH as a cache folder: ~ expanded, no trailing /, and
+# absolute; dies on anything else (including / itself).
+cache_folder() {
+  local f="${1/#\~/$HOME}"
+  f="${f%/}"
+  case "$f" in /?*) printf '%s\n' "$f" ;; *) die "the cache folder must be an absolute path other than /: ${1:-<empty>}" ;; esac
+}
+
+# folder_of HUB [DATASETS] — the cache folder holding them, when HUB is
+# <folder>/hub and DATASETS (if given) is <folder>/datasets; else nothing.
+folder_of() {
+  case "$1" in */hub) ;; *) return 0 ;; esac
+  if [ $# -eq 1 ] || [ "$2" = "${1%/hub}/datasets" ]; then printf '%s\n' "${1%/hub}"; fi
+}
+
+# state DIR — the --state lines for cache folder DIR (see the top of this file).
+state() {
+  local dir="$1" home=no owner=none writable=no exported=no
+  if [[ "$(realpath -m "$dir")/" == "$(realpath -m "$HOME")/"* ]]; then home=yes; fi
+  if [ -e "$dir" ]; then
+    if [ -O "$dir" ]; then owner=me; else owner=other; fi
+  fi
+  if [ -w "$dir/hub" ] && [ -w "$dir/datasets" ]; then writable=yes; fi
+  if is_exported "$dir"; then exported=yes; fi
+  printf 'folder=%s\nhub=%s\ndatasets=%s\nhome=%s\nowner=%s\nshared=%s\nwritable=%s\nexported=%s\n' \
+    "$dir" "$dir/hub" "$dir/datasets" "$home" "$owner" "$(how_shared "$dir")" "$writable" "$exported"
+}
 
 # exported_folder — the folder whose hub/ and datasets/ PROFILE exports, or nothing.
 exported_folder() {
@@ -145,14 +188,29 @@ exported_folder() {
   (
     # shellcheck disable=SC1090
     . "$PROFILE"
-    case "${HF_HUB_CACHE:-}" in
-      */hub) if [ "${HF_DATASETS_CACHE:-}" = "${HF_HUB_CACHE%/hub}/datasets" ]; then printf '%s\n' "${HF_HUB_CACHE%/hub}"; fi ;;
-    esac
+    if [ -n "${HF_HUB_CACHE:-}" ]; then folder_of "$HF_HUB_CACHE" "${HF_DATASETS_CACHE:-}"; fi
   )
+}
+
+# is_exported DIR — both PROFILE and ENVIRONMENT export DIR's caches.
+is_exported() {
+  local line
+  [ "$(cat "$PROFILE" 2>/dev/null)" = "$(profile_lines "$1")" ] || return 1
+  while IFS= read -r line; do
+    grep -qxF -- "$line" "$ENVIRONMENT" 2>/dev/null || return 1
+  done < <(environment_lines "$1")
 }
 
 # profile_lines DIR — what PROFILE holds once DIR is exported.
 profile_lines() { printf 'export HF_HUB_CACHE=%q\nexport HF_DATASETS_CACHE=%q' "$1/hub" "$1/datasets"; }
+
+# environment_lines DIR — what ENVIRONMENT holds once DIR is exported.
+environment_lines() { printf 'HF_HUB_CACHE=%s\nHF_DATASETS_CACHE=%s\n' "$1/hub" "$1/datasets"; }
+
+usage() {
+  echo "usage: share-hf-cache.sh DIR | --state DIR | --folder-of HUB [DATASETS] | --exported-folder" >&2
+  exit 2
+}
 
 die() { echo "error: $*" >&2; exit 1; }
 

@@ -10,6 +10,7 @@ setup_pipeline() {
   unset XDG_CONFIG_HOME XDG_STATE_HOME
   export MIP_GUM="$T/no-gum"   # never download the checklist's gum; fake_gum replaces it
   export MIP_HF_PROFILE="$T/profile.d/hf-cache.sh"   # never this machine's /etc/profile.d
+  export MIP_HF_ENVIRONMENT="$T/environment"         # nor its /etc/environment
   mkdir -p "$HOME" "$MIP_ACTIONS_DIR" "$T/state"
   : >"$MIP_USER_CONFIG"
   : >"$T/events"
@@ -87,3 +88,14 @@ events() { cat "$T/events"; }
 
 # line_of PATTERN — line number of the first event matching PATTERN.
 line_of() { grep -n -m1 -- "$1" "$T/events" | cut -d: -f1; }
+
+# hf_state DIR KEY — one value of admin/share-hf-cache.sh --state DIR.
+hf_state() { bash "$ROOT/admin/share-hf-cache.sh" --state "$1" | sed -n "s/^$2=//p"; }
+
+# export_for_everyone DIR — what root's run of the script leaves, in the test's
+# stand-ins for /etc/profile.d and /etc/environment.
+export_for_everyone() {
+  mkdir -p "$(dirname "$MIP_HF_PROFILE")"
+  printf 'export HF_HUB_CACHE=%s/hub\nexport HF_DATASETS_CACHE=%s/datasets' "$1" "$1" >"$MIP_HF_PROFILE"
+  printf 'HF_HUB_CACHE=%s/hub\nHF_DATASETS_CACHE=%s/datasets\n' "$1" "$1" >>"$MIP_HF_ENVIRONMENT"
+}

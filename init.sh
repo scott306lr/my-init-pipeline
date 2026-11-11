@@ -22,7 +22,8 @@
 # Environment overrides (mainly for tests): MIP_CONF, MIP_ACTIONS_DIR, MIP_USER_CONFIG,
 # MIP_HEARTBEAT (seconds of silence before a "still running" line; default 30),
 # MIP_GUM (the checklist's gum), MIP_UV_INSTALLER_URL (the uv Step's installer),
-# MIP_HF_PROFILE (the system-wide HF cache export admin/share-hf-cache.sh reads).
+# MIP_HF_PROFILE and MIP_HF_ENVIRONMENT (the system-wide HF cache export's two
+# files, which admin/share-hf-cache.sh reads and, as root, writes).
 set -uo pipefail
 
 MIP_CALLER_PATH="$PATH"   # the invoking shell's PATH, before anything here changes it
