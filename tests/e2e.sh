@@ -16,7 +16,7 @@ echo "e2e HOME: $home"
 # gh token, and git's SSH command (set it to something failing to test HTTPS-only).
 passthrough=()
 while IFS='=' read -r name _; do
-  case "$name" in CLAUDE_SETUP_* | GIT_USER_* | HF_HUB_CACHE_DIR | HF_SHARE_GROUP | MANAGED_PYTHON_VERSIONS | GH_TOKEN | GIT_SSH_COMMAND) passthrough+=("$name=${!name}") ;; esac
+  case "$name" in CLAUDE_SETUP_* | GIT_USER_* | HF_HUB_CACHE_DIR | HF_HUB_CACHE_SHARED | MANAGED_PYTHON_VERSIONS | GH_TOKEN | GIT_SSH_COMMAND) passthrough+=("$name=${!name}") ;; esac
 done < <(env)
 
 pipeline() {

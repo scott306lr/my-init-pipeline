@@ -191,8 +191,8 @@ hfc() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" "$1"; }
   hfc check
 }
 
-@test "hf-cache: needs a human only while HF_HUB_CACHE_DIR is empty; the prompt defaults to a system-wide HF_HUB_CACHE" {
-  run env HF_HUB_CACHE_DIR=/x bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" interactive
+@test "hf-cache: needs no human once its settings answer every question; the prompt defaults to a system-wide HF_HUB_CACHE" {
+  run env HF_HUB_CACHE_DIR=/x HF_HUB_CACHE_SHARED=no bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" interactive
   [ "$status" -eq 1 ]
   printf 'HF_HUB_CACHE_DIR=\n' >"$T/config.sh"
   export MIP_USER_CONFIG="$T/config.sh"
@@ -333,41 +333,36 @@ fake_uv_bin() {
   grep -qx 'uv self update nomod=1' "$T/uv.calls"
 }
 
-# fake_sudo STATUS — a sudo on PATH that logs its arguments and exits STATUS.
-fake_sudo() {
-  mkdir -p "$T/bin"
-  printf '#!/bin/sh\necho "$*" >>"%s/sudo.calls"\nexit %s\n' "$T" "$1" >"$T/bin/sudo"
-  chmod +x "$T/bin/sudo"
-  export PATH="$T/bin:$PATH"
-}
 
-@test "hf-share: not applicable while HF_SHARE_GROUP is empty (the default)" {
-  run env HF_SHARE_GROUP= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-share.sh" check
-  [ "$status" -eq 2 ]
-  run env HF_SHARE_GROUP=hfx HF_HUB_CACHE_DIR="$T/none" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-share.sh" check
+# Sharing (no root needed: you own the directory).
+share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >"$T/config.sh"; export MIP_USER_CONFIG="$T/config.sh"; }
+
+@test "hf-cache: HF_HUB_CACHE_SHARED=yes shares a directory outside home with everyone; the Check requires it" {
+  command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
+  share_cfg "$T/srv/hub" yes
+  run hfc interactive
+  [ "$status" -eq 1 ]                        # both answered: no human needed
+  hfc run </dev/null
+  getfacl -p "$T/srv/hub" | grep -qx 'other::rwx'
+  getfacl -p "$T/srv/hub" | grep -qx 'default:other::rwx'
+  hfc check
+  setfacl -b "$T/srv/hub"; chmod 755 "$T/srv/hub"
+  run hfc check
   [ "$status" -eq 1 ]
 }
 
-@test "hf-share: needs a human only when sudo needs a password" {
-  fake_sudo 1
-  action hf-share interactive
-  fake_sudo 0
-  run action hf-share interactive
+@test "hf-cache: asks whether to share only outside home and only if not shared; n keeps it private" {
+  command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
+  share_cfg "$T/srv/hub" ""
+  hfc interactive                            # the question is open
+  printf 'n\n' | hfc run
+  ! getfacl -p "$T/srv/hub" | grep -qx 'default:other::rwx'
+  hfc check                                  # unset setting: private is fine
+  printf '\n' | hfc run                     # Enter: yes
+  getfacl -p "$T/srv/hub" | grep -qx 'default:other::rwx'
+  run hfc interactive                        # shared now: nothing to ask
   [ "$status" -eq 1 ]
-}
-
-@test "hf-share: run announces the sudo command, then runs the admin script for you" {
-  fake_sudo 0
-  run env HF_SHARE_GROUP=hfx HF_HUB_CACHE_DIR="$T/shared/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-share.sh" run
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"hf-share needs sudo: sudo bash $ROOT/admin/share-hf-cache.sh $T/shared/hub hfx $(id -un)"* ]]
-  grep -qxF "bash $ROOT/admin/share-hf-cache.sh $T/shared/hub hfx $(id -un)" "$T/sudo.calls"
-}
-
-@test "hf-share: without sudo, run fails with the command to hand an admin; without a directory it says which setting" {
-  fake_sudo 1
-  run env HF_SHARE_GROUP=hfx HF_HUB_CACHE_DIR="$T/shared/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-share.sh" run
-  [ "$status" -ne 0 ] && [[ "$output" == *"ask an admin to run: curl"*"sudo bash -s -- $T/shared/hub hfx"* ]]
-  run env HF_SHARE_GROUP=hfx HF_HUB_CACHE_DIR= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-share.sh" run
-  [ "$status" -ne 0 ] && [[ "$output" == *"set HF_HUB_CACHE_DIR"* ]]
+  share_cfg "$HOME/hub" ""
+  run hfc interactive                        # inside home: never asked
+  [ "$status" -eq 1 ]
 }

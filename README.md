@@ -1,7 +1,6 @@
 # my-init-pipeline
 
-One command to bring a fresh Linux server to my working setup, **without root**
-(one opt-in Step, marked `[sudo]`, is the exception):
+One command to bring a fresh Linux server to my working setup, **without root**:
 gh, Claude Code (plus my synced `~/.claude`), Codex, herdr, uv, nvitop, zoxide,
 fzf, lazygit, delta, btop, dust and the Hugging Face CLI, plus uv-managed Pythons
 (with C headers), and sets git's commit identity.
@@ -38,15 +37,14 @@ git-identity    git-identity                   # user.name / user.email, if unse
 btop            btop-install     path-env
 dust            dust-install     path-env
 hf              hf-install       uv
-hf-share        hf-share                       # [sudo], n/a unless HF_SHARE_GROUP is set
-hf-cache        hf-cache         path-env hf-share   # interactive unless HF_HUB_CACHE_DIR is set
+hf-cache        hf-cache         path-env      # interactive unless HF_HUB_CACHE_DIR (and, outside home, HF_HUB_CACHE_SHARED) is set
 herdr           herdr-install    claude-config codex
 ```
 
 Dependencies decide the order; Steps with no dependency between them run in parallel.
 Interactive Steps (like `gh-auth`) take the terminal while background Steps keep
 going; anything that requires them waits. A Run without a terminal defers them,
-unless a setting already answers the question (`hf-cache` with `HF_HUB_CACHE_DIR`).
+unless a setting already answers the question (`hf-cache` with `HF_HUB_CACHE_DIR` and `HF_HUB_CACHE_SHARED`).
 
 ## Commands
 
@@ -114,7 +112,7 @@ line; validation reports anything that still requires it.
 
 ## Settings
 
-`config.sh` holds the settings for `claude-config`, `git-identity`, `hf-cache`, `hf-share` and `python`. Each one can also be overridden from the environment:
+`config.sh` holds the settings for `claude-config`, `git-identity`, `hf-cache` and `python`. Each one can also be overridden from the environment:
 
 | Variable | Default | |
 |---|---|---|
@@ -125,7 +123,7 @@ line; validation reports anything that still requires it.
 | `GIT_USER_NAME` | `scott306lr` | git `user.name`, written only if `~/.gitconfig` has none |
 | `GIT_USER_EMAIL` | `scott306lr@gmail.com` | git `user.email`, likewise |
 | `HF_HUB_CACHE_DIR` | *(empty: asked on the terminal)* | exported as `HF_HUB_CACHE` (model and dataset downloads) for every shell, e.g. `/data/hf/hub`. `HF_HOME` is left at `~/.cache/huggingface`, so the token stays private. Change it later with `./init.sh run --force hf-cache hf-cache`; existing downloads are not moved |
-| `HF_SHARE_GROUP` | *(empty: off)* | share `HF_HUB_CACHE_DIR` with this group's users: the `hf-share` Step runs `admin/share-hf-cache.sh` with sudo (see below) |
+| `HF_HUB_CACHE_SHARED` | *(empty: asked)* | `yes` shares an `HF_HUB_CACHE_DIR` outside your home with every user of the server, `no` keeps it yours (see below) |
 | `MANAGED_PYTHON_VERSIONS` | `3.10 3.12` | installed with `uv python install`; `UV_PYTHON_PREFERENCE=only-managed` is exported so `uv venv` / `uv sync` use them (they have `Python.h`) instead of a system Python that may lack its `-dev` package |
 
 Both protocols work because the setup repo records its GitHub marketplaces as
@@ -133,35 +131,33 @@ Both protocols work because the setup repo records its GitHub marketplaces as
 
 ## Sharing the Hugging Face cache between users
 
-Models are big, so users of one machine can share a hub cache while each keeps
-their own `HF_HOME` (token, login state). Setting it up needs root once per server.
-
-**If you have sudo**, set both settings and let the Pipeline do it:
+Models are big, so everyone on a server can share one hub cache while each user
+keeps their own `HF_HOME` (token, login state). No group and no sudo: when the
+`hf-cache` Step's directory is outside your home, it asks whether to share it
+with every user of the server (or set `HF_HUB_CACHE_SHARED=yes`):
 
 ```bash
-HF_HUB_CACHE_DIR=/shared/huggingface_cache/hub HF_SHARE_GROUP=hf ./init.sh run hf-share hf-cache
+HF_HUB_CACHE_DIR=/shared/huggingface_cache/hub HF_HUB_CACHE_SHARED=yes ./init.sh run hf-cache
 ```
 
-The `hf-share` Step prints the sudo command before running it and asks for a
-password only if sudo needs one (passwordless sudo works without a terminal). It
-adds you to the group; a directory it creates is yours. Later users with the same
-settings pass its Check without sudo once an admin has added them to the group.
-Set the two in `config.sh` to keep them. Log in again afterwards to join the group.
+Sharing runs `admin/share-hf-cache.sh` as you: every user may read, add and
+replace entries, and a default ACL keeps new entries that way whoever creates
+them, whatever their umask (Hugging Face's `blobs/` stay read-only, as it makes
+them). Other users get it by pointing their own `HF_HUB_CACHE` there (the
+`hf-cache` Step offers it once it is exported system-wide). Adding a user takes
+nothing.
 
-**Otherwise**, root runs the same script directly, no clone needed:
+Only an admin can export `HF_HUB_CACHE` for users who don't run this Pipeline,
+open a parent folder others can't enter, or install `acl` when `setfacl` is
+missing. Root runs the same script for that, no clone needed:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh \
-  | sudo bash -s -- /shared/huggingface_cache/hub hf alice bob
+  | sudo bash -s -- /shared/huggingface_cache/hub
 ```
 
-That creates group `hf` with those users, makes the directory group-writable
-(setgid plus a default ACL, so it stays that way whatever each user's umask),
-lets the group into any parent others cannot enter, installs `acl` with apt if
-`setfacl` is missing, and exports `HF_HUB_CACHE` for everyone from their next
-login. Re-run it to add a user. Each user then logs in again and runs the
-bootstrap command above; the `hf-cache` Step offers the shared path as its
-default (or set `HF_HUB_CACHE_DIR` to skip the question).
+Any user can then change any cached file, including model code that
+`trust_remote_code` runs, so share only on a server whose users you trust.
 
 ## Known caveats
 
@@ -181,7 +177,7 @@ tests/e2e.sh                              # real installs in a throwaway HOME, r
 GH_TOKEN=$(gh auth token) tests/e2e.sh    # also covers claude-config and herdr
 tests/docker.sh                           # ubuntu:22.04, non-root, no SSH key (HTTPS only), twice
 tests/docker.sh --interactive             # shell in that container, to try gh auth login by hand
-tests/admin.sh                            # admin/share-hf-cache.sh as root in ubuntu:22.04: users share the cache
+tests/admin.sh                            # sharing in ubuntu:22.04: the script as root, and the hf-cache Step as a user
 ```
 
 CI (`.github/workflows/ci.yml`, ubuntu-22.04) runs shellcheck, bats, a bootstrap

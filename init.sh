@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# my-init-pipeline — bring a fresh server to the declared state, without root (one opt-in Step, marked [sudo], is the exception).
+# my-init-pipeline — bring a fresh server to the declared state, without root.
 #
 #   ./init.sh run [STEP...] [options]   run the Pipeline (or STEPs + what they require);
 #                                       on a terminal with no STEP, pick Steps first
@@ -50,7 +50,7 @@ cmd_list() {
   printf '%-15s %-16s %-24s %-6s %s\n' STEP ACTION REQUIRES CHECK SUMMARY
   for s in "${STEPS[@]}"; do
     printf '%-15s %-16s %-24s %-6s %s\n' "$s" "${ACTION[$s]}" "${REQ[$s]:--}" \
-      "$(check_status "$s")" "$(step_summary "$s")"
+      "$(check_status "$s")" "$(action_field "$s" summary)"
   done
 }
 

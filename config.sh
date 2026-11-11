@@ -16,14 +16,14 @@ GIT_USER_NAME="${GIT_USER_NAME:-scott306lr}"
 GIT_USER_EMAIL="${GIT_USER_EMAIL:-scott306lr@gmail.com}"
 
 # Where Hugging Face keeps model and dataset downloads (the HF_HUB_CACHE variable),
-# e.g. /data/hf/hub for a big disk, or a directory shared between users (set up
-# once by root with admin/share-hf-cache.sh). The token stays in ~/.cache/huggingface.
+# e.g. /data/hf/hub for a big disk, or a directory shared between users (see
+# HF_HUB_CACHE_SHARED). The token stays in ~/.cache/huggingface.
 # Empty: the hf-cache Step asks on the terminal instead (and is deferred in a
 # non-interactive Run).
 HF_HUB_CACHE_DIR="${HF_HUB_CACHE_DIR:-}"
-# Share HF_HUB_CACHE_DIR with the other users in this group: the hf-share Step,
-# the only one that needs sudo. Empty (the default): off, and the Step is n/a.
-HF_SHARE_GROUP="${HF_SHARE_GROUP:-}"
+# Share HF_HUB_CACHE_DIR with every user of the server (yes/no) when it lies
+# outside your home. Empty: the hf-cache Step asks.
+HF_HUB_CACHE_SHARED="${HF_HUB_CACHE_SHARED:-}"
 
 # Python versions the python Step installs as uv-managed interpreters (space-separated).
 # These ship their own C headers, unlike a system Python without its -dev package.
