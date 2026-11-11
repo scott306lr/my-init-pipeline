@@ -35,7 +35,7 @@ bash /opt/mip/admin/share-hf-cache.sh relative 2>/dev/null && fail "a relative D
 # The hf-cache Step, as a user, no sudo: dave creates and shares /srv/team/hub.
 mkdir -p /srv/team && chmod 1777 /srv/team
 cfg='HF_HUB_CACHE_DIR=/srv/team/hub HF_HUB_CACHE_SHARED=yes'
-su - dave -c "$cfg /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 || { cat /tmp/run.out; fail "hf-cache run failed"; }
+su - dave -c "$cfg /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 || { cat /tmp/run.out /home/dave/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-cache run failed"; }
 grep -q 'hf-cache *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-cache did not run"; }
 su - dave -c "$cfg bash /opt/mip/lib/step.sh /opt/mip/actions/hf-cache.sh check" || fail "hf-cache Check fails after sharing"
 as dave 'mkdir -p /srv/team/hub/models--y && echo d >/srv/team/hub/models--y/f'
