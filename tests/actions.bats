@@ -526,6 +526,14 @@ shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep
   [ "$status" -ne 0 ] && [[ "$output" == *"absolute path other than /"* ]]
 }
 
+@test "hf-cache and hf-export: the Check reads HF_CACHE_DIR the way run does (a trailing /, a leading ~)" {
+  HF_CACHE_DIR="$HOME/hf/" HF_CACHE_SHARED=no action hf-cache run </dev/null
+  HF_CACHE_DIR="$HOME/hf/" HF_CACHE_SHARED=no action hf-cache check
+  HF_CACHE_DIR='~/hf' HF_CACHE_SHARED=no action hf-cache check
+  run env HF_CACHE_DIR='~/hf/' bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  [ "$status" -eq 2 ]                        # in your home, however it is spelled
+}
+
 @test "hf-cache: a group-shared folder you own counts as shared — nothing to ask, no ACL added" {
   mkdir -p "$T/gown"; chmod 2775 "$T/gown"
   bash "$ROOT/admin/share-hf-cache.sh" --check "$T/gown"

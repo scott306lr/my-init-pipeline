@@ -43,7 +43,7 @@ check() {
   local root
   root="$(hf_cache_recorded)"
   [ -n "$root" ] && writable_caches "$root" &&
-    { [ -z "$HF_CACHE_DIR" ] || [ "$root" = "$HF_CACHE_DIR" ]; } &&
+    { [ -z "$HF_CACHE_DIR" ] || [ "$root" = "$(folder_path "$HF_CACHE_DIR")" ]; } &&
     [ -z "$(env_value HF_HOME)" ] && [ ! -L "$HF_HOME_DEFAULT" ] &&
     { [ "$HF_CACHE_SHARED" != yes ] || share_hf_cache --check "$root"; }
 }

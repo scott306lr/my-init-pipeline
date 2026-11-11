@@ -51,7 +51,8 @@ note() { echo "Every user gets HF_HUB_CACHE and HF_DATASETS_CACHE in $(share_hf_
 # default_folder — HF_CACHE_DIR, else the cache folder in effect, else
 # HF_CACHE_SUGGESTED (root can create it wherever it is).
 default_folder() {
-  local f="${HF_CACHE_DIR:-}"
+  local f=""
+  if [ -n "${HF_CACHE_DIR:-}" ]; then f="$(folder_path "$HF_CACHE_DIR")"; fi
   [ -n "$f" ] || f="$(hf_cache_in_effect)"
   printf '%s\n' "${f:-${HF_CACHE_SUGGESTED:-}}"
 }
