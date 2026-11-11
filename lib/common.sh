@@ -62,9 +62,14 @@ add_env() {
   local var="$1" line="export $1=\"$2\""
   env_file_init
   grep -qxF "$line" "$MIP_ENV_FILE" && return 0
-  sed -i "/^export $var=/d" "$MIP_ENV_FILE"
+  remove_env "$var"
   printf '%s\n' "$line" >>"$MIP_ENV_FILE"
   load_env
+}
+
+# remove_env VAR — drop VAR's export from the managed env file, if any.
+remove_env() {
+  if [ -f "$MIP_ENV_FILE" ]; then sed -i "/^export $1=/d" "$MIP_ENV_FILE"; fi
 }
 
 # env_has_env VAR VALUE — true if add_env VAR VALUE is the recorded value.

@@ -63,6 +63,16 @@ setup() {
   [ "$MIP_VAR" = "$HOME/two" ]
 }
 
+@test "remove_env drops only that variable's export, and is a no-op without an env file" {
+  remove_env MIP_VAR
+  [ ! -f "$MIP_ENV_FILE" ]
+  add_env MIP_VAR '$HOME/one'
+  add_env MIP_VAR_KEEP '$HOME/two'
+  remove_env MIP_VAR
+  ! grep -q '^export MIP_VAR=' "$MIP_ENV_FILE"
+  env_has_env MIP_VAR_KEEP '$HOME/two'
+}
+
 # A local release tarball with the binary nested like dust's/delta's layouts.
 make_release() {
   mkdir -p "$T/rel/tool-v1-x86_64/sub"

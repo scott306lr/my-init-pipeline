@@ -35,7 +35,7 @@ git-identity    git-identity                   # user.name / user.email, if unse
 btop            btop-install     path-env
 dust            dust-install     path-env
 hf              hf-install       uv
-hf-home         hf-home          path-env      # interactive unless HF_HOME_DIR is set
+hf-cache        hf-cache         path-env      # interactive unless HF_HUB_CACHE_DIR is set
 herdr           herdr-install    claude-config codex
 ```
 
@@ -96,7 +96,7 @@ Rules for Actions:
   loaded. Helpers: `have`, `info`, `die`, `fetch`, `run_installer`,
   `github_latest_tag`, `machine_arch`, `release_sha256`, `install_release_binary`
   (download a GitHub release tarball, verify its sha256 when published, install
-  one binary), `add_path`, `add_env`, `add_shell_init`.
+  one binary), `add_path`, `add_env`, `remove_env`, `add_shell_init`.
 
 To swap how something is installed, point its Step at a different Action. The
 Step name and every dependency on it stay unchanged. To remove a Step, delete its
@@ -104,7 +104,7 @@ line; validation reports anything that still requires it.
 
 ## Settings
 
-`config.sh` holds the settings for `claude-config`, `git-identity`, `hf-home` and `python`. Each one can also be overridden from the environment:
+`config.sh` holds the settings for `claude-config`, `git-identity`, `hf-cache` and `python`. Each one can also be overridden from the environment:
 
 | Variable | Default | |
 |---|---|---|
@@ -114,11 +114,25 @@ line; validation reports anything that still requires it.
 | `CLAUDE_SETUP_REF` | *(default branch)* | branch for a fresh clone, e.g. to test a change before merging it |
 | `GIT_USER_NAME` | `scott306lr` | git `user.name`, written only if `~/.gitconfig` has none |
 | `GIT_USER_EMAIL` | `scott306lr@gmail.com` | git `user.email`, likewise |
-| `HF_HOME_DIR` | *(empty: asked on the terminal)* | exported as `HF_HOME` for every shell, e.g. `/data/hf`. Change it later with `./init.sh run --force hf-home hf-home`; the previous location's contents are moved into the new one and `~/.cache/huggingface` becomes a symlink to it |
+| `HF_HUB_CACHE_DIR` | *(empty: asked on the terminal)* | exported as `HF_HUB_CACHE` (model and dataset downloads) for every shell, e.g. `/data/hf/hub`. `HF_HOME` is left at `~/.cache/huggingface`, so the token stays private. Change it later with `./init.sh run --force hf-cache hf-cache`; existing downloads are not moved |
 | `MANAGED_PYTHON_VERSIONS` | `3.10 3.12` | installed with `uv python install`; `UV_PYTHON_PREFERENCE=only-managed` is exported so `uv venv` / `uv sync` use them (they have `Python.h`) instead of a system Python that may lack its `-dev` package |
 
 Both protocols work because the setup repo records its GitHub marketplaces as
 `owner/repo` (its ADR 0006); Claude Code tries SSH first, then HTTPS.
+
+## Sharing the Hugging Face cache between users
+
+Models are big, so users of one machine can share a hub cache while each keeps
+their own `HF_HOME` (token, login state). Root sets the directory up once:
+
+```bash
+sudo admin/share-hf-cache.sh /shared/huggingface_cache/hub hf alice bob
+```
+
+That creates group `hf` with those users, makes the directory group-writable
+(setgid plus a default ACL, so it stays that way whatever each user's umask),
+and exports `HF_HUB_CACHE` for everyone from their next login. Users who run this
+Pipeline set `HF_HUB_CACHE_DIR` to the same path.
 
 ## Known caveats
 

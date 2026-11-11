@@ -107,131 +107,101 @@ session_commands() {
 }
 
 ENV_SH='$HOME/.config/my-init-pipeline/env.sh'
-hf_exports() { grep -c '^export HF_HOME=' "$HOME/.config/my-init-pipeline/env.sh"; }
+envf() { printf '%s\n' "$HOME/.config/my-init-pipeline/env.sh"; }
+hfc() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" "$1"; }
 
-@test "hf-home: HF_HOME_DIR set — no prompt; a changed setting fails the Check and is re-pointed" {
-  run action hf-home check
+@test "hf-cache: HF_HUB_CACHE_DIR set — no prompt; exports only HF_HUB_CACHE; a changed setting is re-pointed" {
+  run action hf-cache check
   [ "$status" -eq 1 ]
-  HF_HOME_DIR="$HOME/hf" action hf-home run </dev/null
-  [ -d "$HOME/hf" ]
-  grep -qxF 'export HF_HOME="$HOME/hf"' "$HOME/.config/my-init-pipeline/env.sh"
-  HF_HOME_DIR="$HOME/hf" action hf-home check
-  action hf-home check                       # unset setting: the recorded one is fine
-  run bash -c ". $ENV_SH; echo \"\$HF_HOME\""
-  [ "$output" = "$HOME/hf" ]
+  HF_HUB_CACHE_DIR="$HOME/hub" action hf-cache run </dev/null
+  [ -d "$HOME/hub" ]
+  grep -qxF 'export HF_HUB_CACHE="$HOME/hub"' "$(envf)"
+  ! grep -q '^export HF_HOME=' "$(envf)"
+  HF_HUB_CACHE_DIR="$HOME/hub" action hf-cache check
+  action hf-cache check                      # unset setting: the recorded one is fine
+  run bash -c ". $ENV_SH; echo \"\$HF_HUB_CACHE\""
+  [ "$output" = "$HOME/hub" ]
 
-  run env HF_HOME_DIR="$T/data/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" check
+  run env HF_HUB_CACHE_DIR="$T/shared/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" check
   [ "$status" -eq 1 ]
-  HF_HOME_DIR="$T/data/hf" action hf-home run </dev/null
-  [ "$(hf_exports)" -eq 1 ]
-  grep -qxF "export HF_HOME=\"$T/data/hf\"" "$HOME/.config/my-init-pipeline/env.sh"
-  HF_HOME_DIR="$T/data/hf" action hf-home check
+  HF_HUB_CACHE_DIR="$T/shared/hub" action hf-cache run </dev/null
+  [ "$(grep -c '^export HF_HUB_CACHE=' "$(envf)")" -eq 1 ]
+  grep -qxF "export HF_HUB_CACHE=\"$T/shared/hub\"" "$(envf)"
+  HF_HUB_CACHE_DIR="$T/shared/hub" action hf-cache check
 }
 
-@test "hf-home: HF_HOME_DIR empty — prompts; Enter keeps the recorded value; ~ expands; relative is refused" {
-  printf 'HF_HOME_DIR=\n' >"$T/config.sh"
-  hf() { MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" "$1"; }
-  run hf check
+@test "hf-cache: HF_HUB_CACHE_DIR empty — prompts; Enter keeps the recorded value; ~ expands; relative is refused" {
+  printf 'HF_HUB_CACHE_DIR=\n' >"$T/config.sh"
+  export MIP_USER_CONFIG="$T/config.sh"
+  run hfc check
   [ "$status" -eq 1 ]                        # not na: a human can answer it
-  run hf run </dev/null                      # no terminal and nothing recorded: default applies
+  run hfc run </dev/null                     # no terminal and nothing recorded: HF's default applies
   [ "$status" -eq 0 ]
-  grep -qxF 'export HF_HOME="$HOME/.cache/huggingface"' "$HOME/.config/my-init-pipeline/env.sh"
-
-  printf '%s/\n' "$T/picked" | hf run
-  [ -d "$T/picked" ]
-  grep -qxF "export HF_HOME=\"$T/picked\"" "$HOME/.config/my-init-pipeline/env.sh"
-  printf '\n' | hf run
-  [ "$(hf_exports)" -eq 1 ]
-  grep -qxF "export HF_HOME=\"$T/picked\"" "$HOME/.config/my-init-pipeline/env.sh"
-  printf '~/hfx\n' | hf run
-  grep -qxF 'export HF_HOME="$HOME/hfx"' "$HOME/.config/my-init-pipeline/env.sh"
-  [ -d "$HOME/hfx" ]
-  run bash -c "printf 'rel/hf\n' | MIP_USER_CONFIG='$T/config.sh' bash '$ROOT/lib/step.sh' '$ROOT/actions/hf-home.sh' run"
+  grep -qxF 'export HF_HUB_CACHE="$HOME/.cache/huggingface/hub"' "$(envf)"
+  printf '%s/\n' "$T/picked" | hfc run
+  grep -qxF "export HF_HUB_CACHE=\"$T/picked\"" "$(envf)"
+  printf '\n' | hfc run
+  grep -qxF "export HF_HUB_CACHE=\"$T/picked\"" "$(envf)"
+  printf '~/hubx\n' | hfc run
+  grep -qxF 'export HF_HUB_CACHE="$HOME/hubx"' "$(envf)"
+  run bash -c "printf 'rel/hub\n' | bash '$ROOT/lib/step.sh' '$ROOT/actions/hf-cache.sh' run"
   [ "$status" -ne 0 ]
   [[ "$output" == *"absolute path"* ]]
-  hf check
+  hfc check
 }
 
-@test "hf-home: first run moves the default cache into the chosen path and removes the old dir" {
-  mkdir -p "$HOME/.cache/huggingface/hub/models--x"; touch "$HOME/.cache/huggingface/token" "$HOME/.cache/huggingface/hub/models--x/blob"
-  HF_HOME_DIR="$T/hf" action hf-home run </dev/null
-  [ -f "$T/hf/token" ] && [ -f "$T/hf/hub/models--x/blob" ]
-  [ -L "$HOME/.cache/huggingface" ] && [ "$(readlink "$HOME/.cache/huggingface")" = "$T/hf" ]
-  [ -f "$HOME/.cache/huggingface/token" ]
-}
-
-@test "hf-home: the default-location symlink follows a re-point, is restored by the Check, and gives way to a real dir" {
-  HF_HOME_DIR="$T/a" action hf-home run </dev/null
-  [ "$(readlink "$HOME/.cache/huggingface")" = "$T/a" ]
-  touch "$T/a/token"
-  HF_HOME_DIR="$T/b" action hf-home run </dev/null
-  [ "$(readlink "$HOME/.cache/huggingface")" = "$T/b" ] && [ -f "$T/b/token" ] && [ ! -e "$T/a" ]
-
-  rm "$HOME/.cache/huggingface"
-  run env HF_HOME_DIR="$T/b" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" check
-  [ "$status" -eq 1 ]
-  HF_HOME_DIR="$T/b" action hf-home run </dev/null
-  [ "$(readlink "$HOME/.cache/huggingface")" = "$T/b" ]
-  HF_HOME_DIR="$T/b" action hf-home check
-
-  # Back to the default: the symlink becomes a real directory holding the data.
-  HF_HOME_DIR="$HOME/.cache/huggingface" action hf-home run </dev/null
-  [ -d "$HOME/.cache/huggingface" ] && [ ! -L "$HOME/.cache/huggingface" ]
-  [ -f "$HOME/.cache/huggingface/token" ] && [ ! -e "$T/b" ]
-  HF_HOME_DIR="$HOME/.cache/huggingface" action hf-home check
-  grep -qxF 'export HF_HOME="$HOME/.cache/huggingface"' "$HOME/.config/my-init-pipeline/env.sh"
-}
-
-@test "hf-home: re-pointing merges into an existing tree; a file present in both is kept and left behind" {
-  HF_HOME_DIR="$T/a" action hf-home run </dev/null
-  mkdir -p "$T/a/hub" "$T/b/hub"
-  printf old >"$T/a/token"; printf new >"$T/b/token"
-  touch "$T/a/hub/from-a" "$T/b/hub/from-b" "$T/a/.hidden"
-  run env HF_HOME_DIR="$T/b" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
+@test "hf-cache: re-pointing leaves existing downloads where they are, with a warning" {
+  mkdir -p "$HOME/.cache/huggingface/hub/models--x"
+  run env HF_HUB_CACHE_DIR="$T/shared/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
   [ "$status" -eq 0 ]
-  [[ "$output" == *"kept $T/b/token"* ]]
-  [ "$(cat "$T/b/token")" = new ] && [ "$(cat "$T/a/token")" = old ]
-  [ -f "$T/b/hub/from-a" ] && [ -f "$T/b/hub/from-b" ] && [ -f "$T/b/.hidden" ]
-  [ ! -e "$T/a/hub" ] && [ ! -e "$T/a/.hidden" ]
-  grep -qxF "export HF_HOME=\"$T/b\"" "$HOME/.config/my-init-pipeline/env.sh"
-  HF_HOME_DIR="$T/b" action hf-home check
+  [[ "$output" == *"were not moved"* ]]
+  [ -d "$HOME/.cache/huggingface/hub/models--x" ] && [ -z "$(ls -A "$T/shared/hub")" ]
 }
 
-@test "hf-home: a path inside (or containing) a non-empty HF_HOME is refused before anything moves" {
-  HF_HOME_DIR="$T/a" action hf-home run </dev/null
-  touch "$T/a/token"
-  run env HF_HOME_DIR="$T/a/sub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
-  [ "$status" -ne 0 ] && [[ "$output" == *"inside the current HF_HOME"* ]]
-  run env HF_HOME_DIR="$T" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
-  [ "$status" -ne 0 ] && [[ "$output" == *"contains the current HF_HOME"* ]]
-  [ -f "$T/a/token" ] && [ ! -e "$T/a/sub" ]
-  HF_HOME_DIR="$T/a" action hf-home check
-  # Same path again (Enter at the prompt): nothing moves, nothing is removed.
-  printf '\n' | MIP_USER_CONFIG=<(echo 'HF_HOME_DIR=') bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run
-  [ -f "$T/a/token" ]
-}
-
-@test "hf-home: an unwritable target fails before the export changes" {
-  HF_HOME_DIR="$T/a" action hf-home run </dev/null
+@test "hf-cache: an unwritable target fails before the export changes" {
+  HF_HUB_CACHE_DIR="$T/a" action hf-cache run </dev/null
   mkdir -p "$T/ro"; chmod 555 "$T/ro"
-  run env HF_HOME_DIR="$T/ro/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
+  run env HF_HUB_CACHE_DIR="$T/ro/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
   chmod 755 "$T/ro"
   [ "$status" -ne 0 ] && [[ "$output" == *"cannot create or write"* ]]
-  HF_HOME_DIR="$T/a" action hf-home check
+  grep -qxF "export HF_HUB_CACHE=\"$T/a\"" "$(envf)"
 }
 
-@test "hf-home: a conflicting file left in ~/.cache/huggingface blocks the symlink and keeps the Check failing" {
-  mkdir -p "$HOME/.cache/huggingface" "$T/hf"; printf old >"$HOME/.cache/huggingface/token"; printf new >"$T/hf/token"
-  run env HF_HOME_DIR="$T/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" run </dev/null
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"still has files"* ]]
-  [ ! -L "$HOME/.cache/huggingface" ] && [ "$(cat "$HOME/.cache/huggingface/token")" = old ]
-  run env HF_HOME_DIR="$T/hf" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-home.sh" check
+@test "hf-cache: undoes a relocated HF_HOME — token back in a private ~/.cache/huggingface, hub left, export dropped" {
+  # What the former hf-home Step left: a shared HF_HOME, exported and symlinked.
+  mkdir -p "$T/shared/hub/models--x" "$T/shared/xet" "$HOME/.cache" "$HOME/.config/my-init-pipeline"
+  printf tok >"$T/shared/token"; touch "$T/shared/stored_tokens"
+  ln -s "$T/shared" "$HOME/.cache/huggingface"
+  printf 'export HF_HOME="%s"\n' "$T/shared" >"$(envf)"
+  run env HF_HUB_CACHE_DIR="$T/shared/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" check
   [ "$status" -eq 1 ]
-  rm "$HOME/.cache/huggingface/token"
-  HF_HOME_DIR="$T/hf" action hf-home run </dev/null
-  [ "$(readlink "$HOME/.cache/huggingface")" = "$T/hf" ]
-  HF_HOME_DIR="$T/hf" action hf-home check
+  HF_HUB_CACHE_DIR="$T/shared/hub" action hf-cache run </dev/null
+  [ -d "$HOME/.cache/huggingface" ] && [ ! -L "$HOME/.cache/huggingface" ]
+  [ "$(stat -c %a "$HOME/.cache/huggingface")" = 700 ]
+  [ "$(cat "$HOME/.cache/huggingface/token")" = tok ] && [ -f "$HOME/.cache/huggingface/stored_tokens" ] && [ -d "$HOME/.cache/huggingface/xet" ]
+  [ ! -e "$T/shared/token" ] && [ -d "$T/shared/hub/models--x" ]
+  ! grep -q '^export HF_HOME=' "$(envf)"
+  HF_HUB_CACHE_DIR="$T/shared/hub" action hf-cache check
+}
+
+@test "hf-cache: the prompt defaults to the relocated HF_HOME's hub; a name already at home is left in place" {
+  mkdir -p "$T/old/hub" "$HOME/.cache/huggingface" "$HOME/.config/my-init-pipeline"
+  printf old >"$T/old/token"; printf new >"$HOME/.cache/huggingface/token"
+  printf 'export HF_HOME="%s"\n' "$T/old" >"$(envf)"
+  printf 'HF_HUB_CACHE_DIR=\n' >"$T/config.sh"
+  run env MIP_USER_CONFIG="$T/config.sh" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"left $T/old/token"* ]]
+  [ "$(cat "$HOME/.cache/huggingface/token")" = new ] && [ "$(cat "$T/old/token")" = old ]
+  grep -qxF "export HF_HUB_CACHE=\"$T/old/hub\"" "$(envf)"
+  ! grep -q '^export HF_HOME=' "$(envf)"
+}
+
+@test "hf-cache: Note tells a shell that still has HF_HOME to drop it" {
+  run env HF_HOME=/x bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" note
+  [[ "$output" == *"unset HF_HOME"* ]]
+  run env -u HF_HOME bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" note
+  [ -z "$output" ]
 }
 
 # fake_uv — a uv on PATH whose `python install V...` marks each V installed under

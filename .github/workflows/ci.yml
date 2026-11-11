@@ -7,7 +7,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: shellcheck
-        run: shellcheck -x init.sh bootstrap.sh lib/*.sh actions/*.sh tests/*.sh config.sh
+        run: shellcheck -x init.sh bootstrap.sh lib/*.sh actions/*.sh admin/*.sh tests/*.sh config.sh
       - name: runner tests (bats)
         run: tests/run.sh
       - name: bootstrap clones and dry-runs

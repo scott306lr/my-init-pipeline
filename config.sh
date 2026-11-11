@@ -15,10 +15,12 @@ CLAUDE_SETUP_REF="${CLAUDE_SETUP_REF:-}"
 GIT_USER_NAME="${GIT_USER_NAME:-scott306lr}"
 GIT_USER_EMAIL="${GIT_USER_EMAIL:-scott306lr@gmail.com}"
 
-# Where Hugging Face keeps its cache, token and hub downloads (the HF_HOME variable),
-# e.g. /data/hf for a big disk. Empty: the hf-home Step asks on the terminal instead
-# (and is deferred in a non-interactive Run).
-HF_HOME_DIR="${HF_HOME_DIR:-}"
+# Where Hugging Face keeps model and dataset downloads (the HF_HUB_CACHE variable),
+# e.g. /data/hf/hub for a big disk, or a directory shared between users (set up
+# once by root with admin/share-hf-cache.sh). The token stays in ~/.cache/huggingface.
+# Empty: the hf-cache Step asks on the terminal instead (and is deferred in a
+# non-interactive Run).
+HF_HUB_CACHE_DIR="${HF_HUB_CACHE_DIR:-}"
 
 # Python versions the python Step installs as uv-managed interpreters (space-separated).
 # These ship their own C headers, unlike a system Python without its -dev package.
