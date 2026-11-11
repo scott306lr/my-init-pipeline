@@ -369,12 +369,16 @@ share_cfg() { printf 'HF_HUB_CACHE_DIR=%s\nHF_HUB_CACHE_SHARED=%s\n' "$1" "$2" >
   [ "$status" -eq 1 ]
 }
 
-@test "hf-export: n/a unless HF_HUB_CACHE is shared; work to do while it is not exported" {
+@test "hf-export: n/a only for a cache in your home; work to do before hf-cache ran, and until shared and exported" {
   run env HF_HUB_CACHE= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
+  [ "$status" -eq 1 ]                        # fresh server: offered, hf-cache will record the directory
+  run env HF_HUB_CACHE="$HOME/.cache/huggingface/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
   [ "$status" -eq 2 ]
   mkdir -p "$T/priv"
   run env HF_HUB_CACHE="$T/priv" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 1 ]                        # outside home, not shared: root shares and exports it
+  run env HF_HUB_CACHE= bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run
+  [ "$status" -ne 0 ] && [[ "$output" == *"run the hf-cache Step first"* ]]
   command -v setfacl >/dev/null || skip "setfacl (acl) not installed"
   bash "$ROOT/admin/share-hf-cache.sh" "$T/srv/hub" >/dev/null
   run env HF_HUB_CACHE="$T/srv/hub" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" check
