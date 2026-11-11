@@ -177,7 +177,7 @@ tests/e2e.sh                              # real installs in a throwaway HOME, r
 GH_TOKEN=$(gh auth token) tests/e2e.sh    # also covers claude-config and herdr
 tests/docker.sh                           # ubuntu:22.04, non-root, no SSH key (HTTPS only), twice
 tests/docker.sh --interactive             # shell in that container, to try gh auth login by hand
-tests/admin.sh                            # sharing in ubuntu:22.04: the script as root, and the hf-cache Step as a user
+tests/admin.sh                            # sharing as root (in ubuntu:22.04; in CI, on the runner): the script, and the hf-cache Step as a user
 ```
 
 CI (`.github/workflows/ci.yml`, ubuntu-22.04) runs shellcheck, bats, a bootstrap
