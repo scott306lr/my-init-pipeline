@@ -41,7 +41,8 @@ herdr           herdr-install    claude-config codex
 
 Dependencies decide the order; Steps with no dependency between them run in parallel.
 Interactive Steps (like `gh-auth`) take the terminal while background Steps keep
-going; anything that requires them waits.
+going; anything that requires them waits. A Run without a terminal defers them,
+unless a setting already answers the question (`hf-cache` with `HF_HUB_CACHE_DIR`).
 
 ## Commands
 
@@ -79,13 +80,15 @@ such as logging in to `claude` and `codex`. Full logs go to
    run()     { run_installer https://example.com/install.sh; }
    upgrade() { mytool self-update; }   # optional, used by --upgrade
    note()    { echo "Remember to ..."; }  # optional, shown after a Run where it ran
+   interactive() { [ -z "$MYTOOL_TOKEN" ]; }  # optional, with `interactive: yes`: 0 while a human is still needed
    ```
 
 2. Add a line to `pipeline.conf`: `mytool  mytool-install  path-env`.
 3. `./init.sh describe mytool`, then `./init.sh run mytool`.
 
 Rules for Actions:
-- **Checks must have no side effects.** `list` and `--dry-run` call them.
+- **Checks must have no side effects.** `list` and `--dry-run` call them, and the
+  same goes for `interactive()`.
 - After `run`, the runner runs the Check again, and the Step only succeeds if it passes.
 - Never edit rc files. Use `add_path '$HOME/some/bin'` for PATH,
   `add_env VAR '$HOME/value'` for an exported variable, and
@@ -123,16 +126,21 @@ Both protocols work because the setup repo records its GitHub marketplaces as
 ## Sharing the Hugging Face cache between users
 
 Models are big, so users of one machine can share a hub cache while each keeps
-their own `HF_HOME` (token, login state). Root sets the directory up once:
+their own `HF_HOME` (token, login state). On each new server, root runs this once,
+no clone needed:
 
 ```bash
-sudo admin/share-hf-cache.sh /shared/huggingface_cache/hub hf alice bob
+curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh \
+  | sudo bash -s -- /shared/huggingface_cache/hub hf alice bob
 ```
 
 That creates group `hf` with those users, makes the directory group-writable
 (setgid plus a default ACL, so it stays that way whatever each user's umask),
-and exports `HF_HUB_CACHE` for everyone from their next login. Users who run this
-Pipeline set `HF_HUB_CACHE_DIR` to the same path.
+lets the group into any parent others cannot enter, installs `acl` with apt if
+`setfacl` is missing, and exports `HF_HUB_CACHE` for everyone from their next
+login. Re-run it to add a user. Each user then logs in again and runs the
+bootstrap command above; the `hf-cache` Step offers the shared path as its
+default (or set `HF_HUB_CACHE_DIR` to skip the question).
 
 ## Known caveats
 
@@ -152,9 +160,10 @@ tests/e2e.sh                              # real installs in a throwaway HOME, r
 GH_TOKEN=$(gh auth token) tests/e2e.sh    # also covers claude-config and herdr
 tests/docker.sh                           # ubuntu:22.04, non-root, no SSH key (HTTPS only), twice
 tests/docker.sh --interactive             # shell in that container, to try gh auth login by hand
+tests/admin.sh                            # admin/share-hf-cache.sh as root in ubuntu:22.04: users share the cache
 ```
 
 CI (`.github/workflows/ci.yml`, ubuntu-22.04) runs shellcheck, bats, a bootstrap
-dry run and the non-interactive e2e.
+dry run, the admin test and the non-interactive e2e.
 
 Design decisions: [docs/adr/](docs/adr/).

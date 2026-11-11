@@ -5,9 +5,10 @@
 #          ~/.cache/huggingface, so the login token (and other per-user state)
 #          never lands on a shared or big disk. To share downloads between
 #          users, point HF_HUB_CACHE_DIR at a directory set up once by root with
-#          admin/share-hf-cache.sh. With HF_HUB_CACHE_DIR set nothing is asked;
-#          otherwise the Run prompts once, defaulting to the recorded value, and
-#          Enter keeps it. Re-pointing does not move existing downloads (they
+#          admin/share-hf-cache.sh. With HF_HUB_CACHE_DIR set nothing is asked,
+#          so the Step also runs without a terminal; otherwise the Run prompts
+#          once, defaulting to the HF_HUB_CACHE already in effect (recorded here,
+#          or set system-wide by that script), and Enter keeps it. Re-pointing does not move existing downloads (they
 #          are re-fetched on use; a shared cache must not hold files only one
 #          user can write). An HF_HOME export or ~/.cache/huggingface symlink
 #          left by the former hf-home Step is undone: the entries you own at its
@@ -15,6 +16,8 @@
 #          that hub/ becomes the prompt's default.
 
 HF_HOME_DEFAULT="$HOME/.cache/huggingface"
+
+interactive() { [ -z "$HF_HUB_CACHE_DIR" ]; }
 
 check() {
   local dir
@@ -29,7 +32,7 @@ run() {
   old="$(recorded HF_HUB_CACHE)"
   legacy="$(legacy_home)"
   if [ -z "$dir" ]; then
-    def="$old"
+    def="${HF_HUB_CACHE:-}"   # env.sh is loaded, so the recorded value wins over the system one
     if [ -z "$def" ] && [ -n "$legacy" ] && [ -d "$legacy/hub" ]; then def="$legacy/hub"; fi
     def="${def:-$HF_HOME_DEFAULT/hub}"
     read -r -p "HF_HUB_CACHE directory [$def]: " dir || true   # EOF: take the default

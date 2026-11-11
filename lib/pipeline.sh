@@ -118,7 +118,16 @@ action_field() {
   action_header "$1" | sed -n "s/^$2:[[:space:]]*//p" | head -n 1
 }
 
-is_interactive() { [ "$(action_field "$1" interactive)" = yes ]; }
+# is_interactive STEP — true if the Step needs a human now: its header says
+# `interactive: yes` and its interactive() function, if it defines one, agrees.
+# An Action defines interactive() when a setting can answer its prompt, so a
+# Run without a terminal still runs it once that setting is given.
+is_interactive() {
+  [ "$(action_field "$1" interactive)" = yes ] || return 1
+  local rc=0
+  step_call "$1" interactive >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 0 ] || [ "$rc" = 3 ]   # 3: no interactive() defined
+}
 
 # ── execution ─────────────────────────────────────────────────────────────────
 

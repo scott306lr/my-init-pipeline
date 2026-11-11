@@ -13,5 +13,7 @@ jobs:
       - name: bootstrap clones and dry-runs
         run: |
           MIP_REPO_URL="$PWD" MIP_DIR="$RUNNER_TEMP/mip" bash bootstrap.sh --dry-run </dev/null
+      - name: shared HF cache setup as root (docker)
+        run: tests/admin.sh
       - name: end-to-end in a clean HOME (non-interactive, twice)
         run: tests/e2e.sh

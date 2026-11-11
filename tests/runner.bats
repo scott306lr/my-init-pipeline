@@ -110,6 +110,21 @@ setup() { setup_pipeline; }
   ! grep -q 'start login' "$T/events"
 }
 
+@test "non-interactive: an Interactive Step whose setting answers its prompt runs; unanswered it is deferred" {
+  step ask; step needs-ask ask
+  fake_action ask --answered-by MIP_ANSWER; fake_action needs-ask
+  run mip run --non-interactive
+  [[ "$output" == *"ask "*"deferred"* ]]
+  run mip run --dry-run
+  [[ "$output" == *"ask "*"todo   yes"* ]]
+  MIP_ANSWER=x run mip run --dry-run
+  [[ "$output" == *"ask "*"todo   no"* ]]
+  MIP_ANSWER=x run mip run --non-interactive
+  [ "$status" -eq 0 ]
+  grep -q 'start ask tty=n' "$T/events"
+  grep -q 'end needs-ask' "$T/events"
+}
+
 @test "non-interactive: satisfied Interactive Step counts as done" {
   step login; step needs-login login
   fake_action login --interactive; fake_action needs-login

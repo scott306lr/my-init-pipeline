@@ -5,6 +5,7 @@ load helpers
 
 setup() {
   setup_pipeline
+  unset HF_HUB_CACHE HF_HOME   # the developer's own Hugging Face settings
   export MIP_USER_CONFIG="$ROOT/config.sh"
   mkdir -p "$HOME/.claude" "$T/repo"
   # settings.json is a symlink into the setup repo, as claude-config leaves it.
@@ -148,6 +149,16 @@ hfc() { bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" "$1"; }
   [ "$status" -ne 0 ]
   [[ "$output" == *"absolute path"* ]]
   hfc check
+}
+
+@test "hf-cache: needs a human only while HF_HUB_CACHE_DIR is empty; the prompt defaults to a system-wide HF_HUB_CACHE" {
+  run env HF_HUB_CACHE_DIR=/x bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" interactive
+  [ "$status" -eq 1 ]
+  printf 'HF_HUB_CACHE_DIR=\n' >"$T/config.sh"
+  export MIP_USER_CONFIG="$T/config.sh"
+  hfc interactive
+  HF_HUB_CACHE="$T/sys/hub" hfc run </dev/null
+  grep -qxF "export HF_HUB_CACHE=\"$T/sys/hub\"" "$(envf)"
 }
 
 @test "hf-cache: re-pointing leaves existing downloads where they are, with a warning" {

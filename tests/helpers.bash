@@ -17,14 +17,16 @@ setup_pipeline() {
 # step NAME [REQUIRES...] — append a Step bound to an Action of the same name.
 step() { echo "$*" | awk '{ $1 = $1 " " $1; print }' >>"$MIP_CONF"; }
 
-# fake_action NAME [--interactive] [--fail] [--na] [--sleep S] [--stays-unsatisfied]
-#                  [--upgrade] [--note TEXT]
+# fake_action NAME [--interactive] [--answered-by VAR] [--fail] [--na] [--sleep S]
+#                  [--stays-unsatisfied] [--upgrade] [--note TEXT]
+# --answered-by VAR: Interactive, but needs no human once VAR is set.
 fake_action() {
-  local name="$1" interactive="" fail=0 na=0 sleep=0 satisfy=1 upgrade=0 note=""
+  local name="$1" interactive="" answered_by="" fail=0 na=0 sleep=0 satisfy=1 upgrade=0 note=""
   shift
   while [ $# -gt 0 ]; do
     case "$1" in
       --interactive) interactive="# interactive: yes" ;;
+      --answered-by) interactive="# interactive: yes"; answered_by="$2"; shift ;;
       --fail) fail=1 ;;
       --na) na=1 ;;
       --sleep) sleep="$2"; shift ;;
@@ -52,6 +54,7 @@ fake_action() {
     echo "  echo \"end $name\" >>\"\$T/events\""
     echo "}"
     [ "$upgrade" = 1 ] && echo "upgrade() { echo \"upgrade $name\" >>\"\$T/events\"; }"
+    if [ -n "$answered_by" ]; then echo "interactive() { [ -z \"\${$answered_by:-}\" ]; }"; fi
     if [ -n "$note" ]; then echo "note() { echo '$note'; }"; fi
   } >"$MIP_ACTIONS_DIR/$name.sh"
 }
