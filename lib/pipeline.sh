@@ -365,9 +365,7 @@ pipeline_run() {
 
   local failed=0 n_ok=0 n_skip=0 n_left=0
   for s in "${plan[@]}"; do
-    case "${state[$s]}" in
-      pending) state[$s]=aborted; report "$s" aborted; n_left=$((n_left + 1)) ;;
-    esac
+    if [ "${state[$s]}" = pending ]; then state[$s]=aborted; report "$s" aborted; fi
     case "$(result_kind "${state[$s]}")" in
       ok) n_ok=$((n_ok + 1)) ;;
       skip) n_skip=$((n_skip + 1)) ;;

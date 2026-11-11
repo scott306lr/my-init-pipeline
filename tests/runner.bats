@@ -51,6 +51,14 @@ setup() { setup_pipeline; }
   grep -q 'boom from a' "$HOME/.local/state/my-init-pipeline/runs/latest/a.log"
 }
 
+@test "the summary counts each Step once: a failed one is not 'not completed', an aborted one counts once" {
+  step a; step b a; step c
+  fake_action a --fail; fake_action b; fake_action c
+  run mip run -j 1 --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Run: 0 ran, 0 already satisfied, 2 not completed, FAILED."* ]]
+}
+
 @test "a Check that still fails after run marks the Step failed" {
   step a
   fake_action a --stays-unsatisfied
