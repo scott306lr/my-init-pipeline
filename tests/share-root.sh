@@ -14,7 +14,11 @@ set -euo pipefail
 # A copy every test user can read (a checkout under a home directory may not be).
 rm -rf /opt/mip && cp -r "$1" /opt/mip && chmod -R a+rX /opt/mip
 fail() { echo "FAIL: $*"; exit 1; }
-as() { su - "$1" -c "umask 077; $2"; }
+# login USER CMD — a login shell for USER. The CI runner's /etc/environment
+# sets XDG_CONFIG_HOME to the runner account's folder (runner-images
+# configure-environment.sh), which no test user can write; drop it.
+login() { su - "$1" -c "unset XDG_CONFIG_HOME; $2"; }
+as() { login "$1" "umask 077; $2"; }
 for u in alice bob carol dave; do useradd -m "$u"; done
 mkdir -p /srv/locked && chmod 700 /srv/locked
 
@@ -35,9 +39,9 @@ bash /opt/mip/admin/share-hf-cache.sh relative 2>/dev/null && fail "a relative D
 # The hf-cache Step, as a user, no sudo: dave creates and shares /srv/team/hub.
 mkdir -p /srv/team && chmod 1777 /srv/team
 cfg='HF_HUB_CACHE_DIR=/srv/team/hub HF_HUB_CACHE_SHARED=yes'
-su - dave -c "$cfg /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 || { cat /tmp/run.out /home/dave/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-cache run failed"; }
+login dave "$cfg /opt/mip/init.sh run hf-cache </dev/null" >/tmp/run.out 2>&1 || { cat /tmp/run.out /home/dave/.local/state/my-init-pipeline/runs/latest/*.log; fail "hf-cache run failed"; }
 grep -q 'hf-cache *ran' /tmp/run.out || { cat /tmp/run.out; fail "hf-cache did not run"; }
-su - dave -c "$cfg bash /opt/mip/lib/step.sh /opt/mip/actions/hf-cache.sh check" || fail "hf-cache Check fails after sharing"
+login dave "$cfg bash /opt/mip/lib/step.sh /opt/mip/actions/hf-cache.sh check" || fail "hf-cache Check fails after sharing"
 as dave 'mkdir -p /srv/team/hub/models--y && echo d >/srv/team/hub/models--y/f'
 as carol 'echo c >>/srv/team/hub/models--y/f && mkdir /srv/team/hub/models--y/sub' || fail "another user cannot write the shared cache"
 echo "admin: ok"
