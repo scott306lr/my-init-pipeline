@@ -5,7 +5,7 @@
 # cache), as HF_HOME would, but never the login token.
 #
 #   admin/share-hf-cache.sh DIR             share DIR (as its owner, or as root)
-#   admin/share-hf-cache.sh --check DIR     exit 0 if DIR is shared
+#   admin/share-hf-cache.sh --check DIR     exit 0 if DIR is shared (an ACL, or a setgid group)
 #   admin/share-hf-cache.sh --exported DIR  exit 0 if DIR's hub/ and datasets/ are exported system-wide
 #   admin/share-hf-cache.sh --exported-folder  print the folder exported system-wide, if any
 #   curl -fsSL https://raw.githubusercontent.com/scott306lr/my-init-pipeline/main/admin/share-hf-cache.sh | sudo bash -s -- DIR
@@ -14,8 +14,10 @@
 # DIR/datasets if missing, and lets every user read, add and replace entries,
 # through a default ACL that keeps new entries that way whoever creates them,
 # whatever their umask. Files under blobs/ keep the read-only mode Hugging Face
-# gives its immutable payloads. In a DIR someone else owns and already shared,
-# it covers just your own entries (say, downloads you moved in). As root it
+# gives its immutable payloads. In a DIR already shared it covers just your own
+# entries (say, downloads you moved in), following how DIR is shared: its ACL,
+# or its setgid group (your entries join the group and lose any ACL they brought,
+# as if created there). As root it
 # also covers entries other users own, installs acl (setfacl) with apt if
 # missing, lets everyone into a parent they cannot enter, and exports
 # HF_HUB_CACHE=DIR/hub and HF_DATASETS_CACHE=DIR/datasets for every user
@@ -34,27 +36,22 @@ main() {
   if [ "${1:-}" = --exported-folder ]; then exported_folder; return; fi
   case "${1:-}" in --check | --exported) query="$1"; shift ;; esac
   if [ $# -ne 1 ]; then
-    echo "usage: share-hf-cache.sh [--check | --exported] DIR" >&2
+    echo "usage: share-hf-cache.sh [--check | --exported] DIR | --exported-folder" >&2
     exit 2
   fi
   dir="${1%/}"
   case "$dir" in /?*) ;; *) die "DIR must be an absolute path: $dir" ;; esac
   case "$query" in
-    --check) is_shared "$dir"; return ;;
+    --check) [ "$(how_shared "$dir")" != none ]; return ;;
     --exported) [ "$(cat "$PROFILE" 2>/dev/null)" = "$(profile_lines "$dir")" ]; return ;;
   esac
   if [ "$(id -u)" = 0 ]; then root=1; fi
 
-  if [ "$root" = 1 ]; then
-    ensure_setfacl
-  elif ! command -v setfacl >/dev/null; then
-    die "setfacl not found (package acl); ask root to run: sudo bash $0 $dir"
-  fi
   if [ ! -d "$dir" ]; then
     mkdir -p "$dir"
     if [ "$root" = 1 ] && [ -n "${SUDO_USER:-}" ]; then chown "$SUDO_USER" "$dir"; fi
   fi
-  if [ "$root" = 0 ] && [ ! -O "$dir" ] && ! is_shared "$dir"; then
+  if [ "$root" = 0 ] && [ ! -O "$dir" ] && [ "$(how_shared "$dir")" = none ]; then
     die "$dir belongs to $(stat -c %U "$dir"); ask them, or root, to run: share-hf-cache.sh $dir"
   fi
   for p in "$dir/hub" "$dir/datasets"; do
@@ -64,6 +61,18 @@ main() {
     fi
   done
 
+  # A folder shared through its group stays so: your entries join the group.
+  if [ "$root" = 0 ] && [ "$(how_shared "$dir")" = group ]; then
+    join_group "$dir"
+    echo "$dir is shared through group $(stat -c %G "$dir"); your entries in it now are too"
+    return
+  fi
+
+  if [ "$root" = 1 ]; then
+    ensure_setfacl
+  elif ! command -v setfacl >/dev/null; then
+    die "setfacl not found (package acl); ask root to run: sudo bash $0 $dir"
+  fi
   # Root covers every entry; anyone else, the entries they own.
   local -a mine=()
   if [ "$root" = 0 ]; then mine=(-user "$(id -u)"); fi
@@ -98,11 +107,34 @@ main() {
   fi
 }
 
-# is_shared DIR — everyone may add entries to DIR, and so may they to new subdirectories.
-is_shared() {
+# how_shared DIR — how DIR lets other users add entries: acl (everyone, and
+# new subdirectories too, by its default ACL), group (it hands its group down
+# with the setgid bit and the group may write), or none.
+how_shared() {
   local acl
-  [ -d "$1" ] && acl="$(getfacl -p "$1" 2>/dev/null)" || return 1
-  grep -qx 'other::rwx' <<<"$acl" && grep -qx 'default:other::rwx' <<<"$acl"
+  if [ -d "$1" ] && acl="$(getfacl -p "$1" 2>/dev/null)" &&
+    grep -qx 'other::rwx' <<<"$acl" && grep -qx 'default:other::rwx' <<<"$acl"; then
+    echo acl
+  elif [ -d "$1" ] && [ -g "$1" ] && [ "$(stat -c %A "$1" | cut -c 6)" = w ]; then
+    echo group
+  else
+    echo none
+  fi
+}
+
+# join_group DIR — give your entries in a group-shared DIR its group and group
+# write, and drop any ACL they brought along (from a home with a default ACL,
+# where `chmod g+…` would move only the mask), as if they had been created
+# there. Blob payloads stay read-only.
+join_group() {
+  local dir="$1" grp me
+  grp="$(stat -c %G "$dir")" me="$(id -u)"
+  if command -v setfacl >/dev/null && [ -z "$(getfacl -p --skip-base "$dir" 2>/dev/null)" ]; then
+    find "$dir" -user "$me" ! -type l -exec setfacl -b {} +
+  fi
+  find "$dir" -user "$me" ! -group "$grp" -exec chgrp -h "$grp" {} +
+  find "$dir" -user "$me" -type d -exec chmod g+rwxs {} +
+  find "$dir" -user "$me" -type f ! -path '*/blobs/*' -exec chmod g+rw {} +
 }
 
 PROFILE="${MIP_HF_PROFILE:-/etc/profile.d/hf-cache.sh}"   # override: tests

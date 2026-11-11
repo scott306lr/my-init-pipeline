@@ -516,3 +516,22 @@ shared_dir() { getfacl -p "$1" | grep -qx 'other::rwx' && getfacl -p "$1" | grep
   [ -g "$T/grp/datasets/ds___y" ]
   [ "$(stat -c %a "$T/grp/hub/blobs/12/1234")" = 444 ]   # blob payloads stay read-only
 }
+
+@test "hf-cache and hf-export: / is refused as the cache folder, the same way by both" {
+  run bash -c "printf '/\n' | bash '$ROOT/lib/step.sh' '$ROOT/actions/hf-cache.sh' run"
+  [ "$status" -ne 0 ] && [[ "$output" == *"absolute path other than /"* ]]
+  run env HF_CACHE_DIR=/ bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" run </dev/null
+  [ "$status" -ne 0 ] && [[ "$output" == *"absolute path other than /"* ]]
+  run env HF_CACHE_DIR=/ bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-export.sh" run </dev/null
+  [ "$status" -ne 0 ] && [[ "$output" == *"absolute path other than /"* ]]
+}
+
+@test "hf-cache: a group-shared folder you own counts as shared — nothing to ask, no ACL added" {
+  mkdir -p "$T/gown"; chmod 2775 "$T/gown"
+  bash "$ROOT/admin/share-hf-cache.sh" --check "$T/gown"
+  run env HF_CACHE_DIR="$T/gown" bash "$ROOT/lib/step.sh" "$ROOT/actions/hf-cache.sh" interactive
+  [ "$status" -eq 1 ]
+  HF_CACHE_DIR="$T/gown" action hf-cache run </dev/null
+  exports "$T/gown"
+  if command -v getfacl >/dev/null; then [ -z "$(getfacl -p --skip-base "$T/gown")" ]; fi
+}

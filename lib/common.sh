@@ -27,11 +27,19 @@ root_outside_container() {
 # in_home DIR — true if DIR is your home directory or lies below it.
 in_home() { [[ "$(realpath -m "$1")/" == "$(realpath -m "$HOME")/"* ]]; }
 
+# hub_parent HUB — the folder holding HUB when HUB is <folder>/hub, else nothing.
+hub_parent() { case "$1" in */hub) printf '%s\n' "${1%/hub}" ;; esac; }
+
 # hf_cache_root HUB DATASETS — the cache folder holding both, when HUB is
 # <folder>/hub and DATASETS is <folder>/datasets; else nothing.
 hf_cache_root() {
-  case "$1" in */hub) if [ "$2" = "${1%/hub}/datasets" ]; then printf '%s\n' "${1%/hub}"; fi ;; esac
+  local f
+  f="$(hub_parent "$1")"
+  if [ -n "$f" ] && [ "$2" = "$f/datasets" ]; then printf '%s\n' "$f"; fi
 }
+
+# hf_cache_recorded — the cache folder env.sh records (the hf-cache Step's), or nothing.
+hf_cache_recorded() { hf_cache_root "$(env_value HF_HUB_CACHE)" "$(env_value HF_DATASETS_CACHE)"; }
 
 # hf_cache_in_effect — the Hugging Face cache folder already chosen, first found
 # of: the one env.sh records (the hf-cache Step's), the one exported for every
@@ -40,10 +48,26 @@ hf_cache_root() {
 # Nothing when none is.
 hf_cache_in_effect() {
   local f
-  f="$(hf_cache_root "$(env_value HF_HUB_CACHE)" "$(env_value HF_DATASETS_CACHE)")"
+  f="$(hf_cache_recorded)"
   [ -n "$f" ] || f="$(share_hf_cache --exported-folder)"
-  if [ -z "$f" ]; then case "${HF_HUB_CACHE:-}" in */hub) f="${HF_HUB_CACHE%/hub}" ;; esac; fi
+  [ -n "$f" ] || f="$(hub_parent "${HF_HUB_CACHE:-}")"
   if [ -n "$f" ]; then printf '%s\n' "$f"; fi
+}
+
+# folder_path PATH — PATH as a cache folder: ~ expanded, no trailing /, and
+# absolute; dies on anything else (including / itself).
+folder_path() {
+  local f="${1/#\~/$HOME}"
+  f="${f%/}"
+  case "$f" in /?*) printf '%s\n' "$f" ;; *) die "the cache folder must be an absolute path other than /: ${1:-<empty>}" ;; esac
+}
+
+# ask_folder QUESTION DEFAULT — ask on the terminal for a cache folder; Enter,
+# or no answer at all (EOF), takes DEFAULT. Prints it as folder_path does.
+ask_folder() {
+  local f
+  read -r -p "$1 [$2]: " f || true
+  folder_path "${f:-$2}"
 }
 
 # share_hf_cache [--check | --exported] DIR | --exported-folder —

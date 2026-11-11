@@ -82,7 +82,8 @@ HF_CACHE_DIR=$HOME/.cache/huggingface ./init.sh run hf-cache
 ```
 
 **Move to another folder** (your downloads move with you; a shared folder keeps
-its files):
+its files). `--force hf-cache` redoes the Step even though it is done; the
+second `hf-cache` is the Step to run:
 
 ```bash
 HF_CACHE_DIR=/data/hf ./init.sh run --force hf-cache hf-cache
