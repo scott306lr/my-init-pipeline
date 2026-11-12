@@ -13,7 +13,8 @@ plans() {
   local check mode unchosen interactive terminal has_upgrade arrow want got bad=0
   while read -r check mode unchosen interactive terminal has_upgrade arrow want; do
     [ -n "$check" ] || continue
-    got="$(step_plan "$check" "$mode" "$unchosen" "$interactive" "$terminal" "$has_upgrade")"
+    got="$(step_plan check="$check" mode="$mode" unchosen="$unchosen" interactive="$interactive" \
+      terminal="$terminal" has_upgrade="$has_upgrade")"
     if [ "$got" != "$want" ]; then
       echo "$check $mode unchosen=$unchosen interactive=$interactive terminal=$terminal has_upgrade=$has_upgrade: got $got, want $want"
       bad=1
@@ -88,4 +89,23 @@ plans() {
     done  upgrade  no  yes no  yes => done
     done  upgrade  no  yes yes no  => done
   "
+}
+
+@test "before the Check is taken, the Plan says whether it turns on it: not when the Step is forced" {
+  plans "
+    ?     install  no  no  yes no  => ?
+    ?     upgrade  yes yes no  yes => ?
+    ?     force    no  no  yes no  => run
+    ?     force    no  yes no  no  => deferred
+    ?     force    no  yes yes no  => run
+  "
+}
+
+@test "inputs have defaults (install, Check not taken, nothing special); an unknown input is refused" {
+  [ "$(step_plan)" = '?' ]
+  [ "$(step_plan check=todo)" = run ]
+  [ "$(step_plan check=todo interactive=yes)" = deferred ]
+  [ "$(step_plan check=done mode=upgrade has_upgrade=yes)" = upgrade ]
+  run step_plan chekc=todo
+  [ "$status" -eq 2 ] && [[ "$output" == *"unknown input chekc=todo"* ]]
 }

@@ -7,6 +7,9 @@ load helpers
 
 setup() { setup_pipeline; }
 
+# plan_of STEP — STEP's PLAN column in the dry run held by $output.
+plan_of() { awk -v s="$1" '$1 == s { print $2 }' <<<"$output"; }
+
 @test "runs Steps in dependency order, not file order" {
   step c b; step b a; step a
   for s in a b c; do fake_action $s; done
@@ -206,6 +209,27 @@ setup() { setup_pipeline; }
   grep -q 'note() failed' "$HOME/.local/state/my-init-pipeline/runs/latest/a.log"
 }
 
+@test "an Action file that cannot be loaded fails its Step with the reason in the log, Interactive or not" {
+  step broken; step other
+  printf '%s\n' '# summary: broken' '# interactive: yes' 'no-such-command-here' 'check() { :; }' 'run() { :; }' >"$MIP_ACTIONS_DIR/broken.sh"
+  fake_action other
+  run bash "$ROOT/lib/step.sh" "$MIP_ACTIONS_DIR/broken.sh" --defines check
+  [ "$status" -eq 126 ]
+  run mip run -j 1 --non-interactive
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"✗ broken "*"failed"* ]] && [[ "$output" != *"deferred"* ]]
+  grep -q 'no-such-command-here' "$HOME/.local/state/my-init-pipeline/runs/latest/broken.log"
+}
+
+@test "a forced Step's Check is not taken, in a Run or a dry run" {
+  step a
+  printf '%s\n' '# summary: a' 'check() { echo checked >>"$T/events"; }' 'run() { echo ran >>"$T/events"; }' >"$MIP_ACTIONS_DIR/a.sh"
+  run mip run --force a --dry-run
+  [ "$(plan_of a)" = run ] && [ -z "$(events)" ]
+  mip run --force a --non-interactive
+  [ "$(events)" = "$(printf 'ran\nchecked')" ]   # only the Check after run()
+}
+
 @test "--upgrade announces upgrading" {
   step a; fake_action a --upgrade
   touch "$T/state/a"
@@ -323,9 +347,6 @@ setup() { setup_pipeline; }
   run mip describe nope
   [ "$status" -ne 0 ]
 }
-
-# plan_of STEP — STEP's PLAN column in the dry run held by $output.
-plan_of() { awk -v s="$1" '$1 == s { print $2 }' <<<"$output"; }
 
 @test "dry run reports the plan and changes nothing" {
   step a; step b a; fake_action a; fake_action b

@@ -19,10 +19,12 @@ action_field() {
 }
 
 # step_call STEP FUNCTION [ARG...] — run one function of the Step's Action.
-# Its status is the function's, or 127 when the Action does not define it.
+# Its status is the function's, 127 when the Action does not define it, or 126
+# when the Action file cannot be loaded.
 step_call() { bash "$MIP_ROOT/lib/step.sh" "$(action_file "$1")" "${@:2}"; }
 
-# action_defines STEP FUNCTION — true if the Step's Action defines FUNCTION.
+# action_defines STEP FUNCTION — status 0 if the Step's Action defines
+# FUNCTION, 1 if it does not, 126 if the Action file cannot be loaded.
 action_defines() { step_call "$1" --defines "$2" >/dev/null 2>&1; }
 
 # is_optional STEP — true if the header says `optional: yes`: offered, never run
@@ -35,8 +37,13 @@ is_optional() { [ "$(action_field "$1" optional)" = yes ]; }
 # Run without a terminal still runs it once that setting is given.
 is_interactive() {
   [ "$(action_field "$1" interactive)" = yes ] || return 1
-  action_defines "$1" interactive || return 0
-  step_call "$1" interactive >/dev/null 2>&1
+  local rc=0
+  action_defines "$1" interactive || rc=$?
+  case "$rc" in
+    0) step_call "$1" interactive >/dev/null 2>&1 ;;
+    1) return 0 ;;
+    *) return 1 ;;   # it cannot be loaded: no human can help; it fails where its log says why
+  esac
 }
 
 # check_word STATUS — what a check() status means: done (0), na (2: it does not

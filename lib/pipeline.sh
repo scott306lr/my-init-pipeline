@@ -147,16 +147,17 @@ pipeline_choose() {
   done
 }
 
-# step_plan CHECK MODE UNCHOSEN INTERACTIVE TERMINAL HAS_UPGRADE — what a Run
-# intends for one Step (GLOSSARY: Plan). Every rule about it is here, and
-# nothing else: it reads no state and runs nothing.
-#   CHECK        done | na | todo: the Step's Check now (ignored when MODE is force)
-#   MODE         install | upgrade | force
-#   UNCHOSEN     yes | no: an Optional Step that was not chosen
-#   INTERACTIVE  yes | no: the Step needs a human
-#   TERMINAL     yes | no: the Run has one
-#   HAS_UPGRADE  yes | no: the Action defines upgrade()
+# step_plan [INPUT=VALUE]... — what a Run intends for one Step (GLOSSARY:
+# Plan). Every rule about it is here, and nothing else: it reads no state and
+# runs nothing. Inputs, each with its default:
+#   mode=install     install | upgrade | force
+#   check=?          done | na | todo: the Step's Check now; ? when not taken yet
+#   unchosen=no      yes: an Optional Step that was not chosen
+#   interactive=no   yes: the Step needs a human
+#   terminal=no      yes: the Run has one
+#   has_upgrade=no   yes: the Action defines upgrade()
 # Prints one of:
+#   ?         the Plan turns on the Check: take it and ask again
 #   na        the Check does not apply here
 #   done      the Check passes and there is nothing to upgrade, or the upgrade
 #             needs a human and there is no terminal (what requires it still runs)
@@ -165,10 +166,17 @@ pipeline_choose() {
 #   deferred  work to do that needs a human, and no terminal
 #   run       call run()
 step_plan() {
-  local check="$1" mode="$2" unchosen="$3" interactive="$4" terminal="$5" has_upgrade="$6" human=yes
+  local mode=install check='?' unchosen=no interactive=no terminal=no has_upgrade=no human=yes input
+  for input in "$@"; do
+    case "$input" in
+      mode=* | check=* | unchosen=* | interactive=* | terminal=* | has_upgrade=*) local "$input" ;;
+      *) echo "step_plan: unknown input $input" >&2; return 2 ;;
+    esac
+  done
   if [ "$interactive" = yes ] && [ "$terminal" != yes ]; then human=no; fi   # needed, and not there
-  if [ "$mode" != force ]; then
+  if [ "$mode" != force ]; then   # forced: whatever the Check says, there is work to do
     case "$check" in
+      '?') echo '?'; return ;;
       na) echo na; return ;;
       done)
         if [ "$mode" = upgrade ] && [ "$has_upgrade" = yes ] && [ "$human" = yes ]; then echo upgrade; else echo "done"; fi
@@ -180,19 +188,24 @@ step_plan() {
   else echo run; fi
 }
 
-# step_decide STEP INTERACTIVE — take STEP's Check and print its Plan for this
-# Run. It only gathers step_plan's inputs (the Check, this Run's choices, what
-# the Action defines) and applies no rule itself, so it takes the Check and
-# asks about upgrade() even where the Plan will not turn on them. INTERACTIVE
-# is yes | no. The Check's output goes to fd 9.
+# step_decide STEP INTERACTIVE — print STEP's Plan for this Run. It gathers
+# step_plan's inputs and applies no rule itself: it asks first with what this
+# Run already knows, and takes the Check (one shell, which also says whether
+# the Action has upgrade()) only when step_plan says the Plan turns on it.
+# INTERACTIVE is yes | no. The Check's output goes to fd 9.
 step_decide() {
-  local step="$1" rc=0 unchosen=no terminal=no has_upgrade=no
-  echo "-- check" >&9
-  step_call "$step" check >&9 2>&9 || rc=$?
-  if [ -n "${UNCHOSEN[$step]:-}" ]; then unchosen=yes; fi
-  if [ "${MIP_INTERACTIVE:-0}" = 1 ]; then terminal=yes; fi
-  if action_defines "$step" upgrade; then has_upgrade=yes; fi
-  step_plan "$(check_word "$rc")" "${STEP_MODE[$step]:-install}" "$unchosen" "$2" "$terminal" "$has_upgrade"
+  local step="$1" rc=0 defined plan
+  local -a known=(mode="${STEP_MODE[$1]:-install}" interactive="$2")
+  if [ -n "${UNCHOSEN[$step]:-}" ]; then known+=(unchosen=yes); fi
+  if [ "${MIP_INTERACTIVE:-0}" = 1 ]; then known+=(terminal=yes); fi
+  plan="$(step_plan "${known[@]}")"
+  if [ "$plan" = '?' ]; then
+    echo "-- check" >&9
+    defined="$(step_call "$step" --probe 8>&1 >&9 2>&9)" || rc=$?
+    case " $defined " in *" upgrade "*) known+=(has_upgrade=yes) ;; esac
+    plan="$(step_plan check="$(check_word "$rc")" "${known[@]}")"
+  fi
+  printf '%s\n' "$plan"
 }
 
 # ── execution ─────────────────────────────────────────────────────────────────
