@@ -76,12 +76,12 @@ cmd_describe() {
 cmd_run() {
   local -a targets=()
   local dry=0 yes=0 rc=0 picked mode=install s check
-  FORCED=() UPGRADED=()
+  FORCE=() UPGRADE=()
   MIP_JOBS="$(nproc 2>/dev/null || echo 4)"
   MIP_INTERACTIVE=1
   while [ $# -gt 0 ]; do
     case "$1" in
-      --force) [ $# -ge 2 ] || die "--force needs a step"; FORCED[$2]=1; shift ;;
+      --force) [ $# -ge 2 ] || die "--force needs a step"; FORCE[$2]=1; shift ;;
       --upgrade) mode=upgrade ;;
       -j | --jobs) [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "$1 needs a positive number"; MIP_JOBS="$2"; shift ;;
       --non-interactive) MIP_INTERACTIVE=0 ;;
@@ -95,11 +95,11 @@ cmd_run() {
 
   if [ "$dry" = 0 ]; then refuse_root; fi
   load_pipeline
-  for s in "${targets[@]}" "${!FORCED[@]}"; do need_step "$s"; done
+  for s in "${targets[@]}" "${!FORCE[@]}"; do need_step "$s"; done
 
   # Like create-t3-app: ask on a terminal, unless told what to do (Steps named,
   # -y, an upgrade or a dry run, which must not download the checklist's gum).
-  if [ ${#targets[@]} -eq 0 ] && [ ${#FORCED[@]} -eq 0 ] && [ "$yes" = 0 ] && [ "$dry" = 0 ] &&
+  if [ ${#targets[@]} -eq 0 ] && [ ${#FORCE[@]} -eq 0 ] && [ "$yes" = 0 ] && [ "$dry" = 0 ] &&
     [ "$mode" = install ] && [ "$MIP_INTERACTIVE" = 1 ] && [ -t 0 ] && [ -t 1 ]; then
     picked="$(checklist)" || rc=$?
     if [ "$rc" = 130 ]; then echo "Cancelled; nothing was run."; return 130; fi
@@ -112,7 +112,7 @@ cmd_run() {
       while read -r s check; do
         targets+=("$s")
         [ "$check" = "done" ] || continue
-        if action_defines "$s" upgrade; then UPGRADED[$s]=1; else FORCED[$s]=1; fi
+        if action_defines "$s" upgrade; then UPGRADE[$s]=1; else FORCE[$s]=1; fi
       done <<<"$picked"
     fi
   fi
@@ -125,7 +125,7 @@ cmd_run() {
 
   if [ "$dry" = 1 ]; then dry_run; return 0; fi
 
-  printf 'Pipeline: %d step(s), up to %d in parallel%s\n\n' "${#PLAN[@]}" "$MIP_JOBS" \
+  printf 'Pipeline: %d step(s), up to %d in parallel%s\n\n' "${#SELECTED[@]}" "$MIP_JOBS" \
     "$([ "$MIP_INTERACTIVE" = 0 ] && echo ', non-interactive')"
   local env_before
   env_before="$(env_digest)"
@@ -138,13 +138,12 @@ cmd_run() {
 # dry_run — print the Plan: what this Run would do to each selected Step, from
 # its Check now. A Step that runs after another may plan differently by then.
 dry_run() {
-  local s check interactive
+  local s interactive
   printf '%-15s %-9s %s\n' STEP PLAN REQUIRES
-  for s in "${PLAN[@]}"; do
-    check=todo interactive=no
-    if [ "${STEP_MODE[$s]}" != force ]; then check="$(check_status "$s")"; fi
+  for s in "${SELECTED[@]}"; do
+    interactive=no
     if is_interactive "$s"; then interactive=yes; fi
-    printf '%-15s %-9s %s\n' "$s" "$(step_plan_for "$s" "$check" "$interactive")" "${REQ[$s]:--}"
+    printf '%-15s %-9s %s\n' "$s" "$(step_decide "$s" "$interactive" 9>/dev/null)" "${REQ[$s]:--}"
   done
   echo "(dry run: the Plan is for the current state; nothing was changed)"
 }

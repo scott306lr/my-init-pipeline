@@ -85,27 +85,6 @@ setup() { setup_pipeline; }
   ! grep -q 'start c' "$T/events"
 }
 
-@test "--force re-runs a Step whose Check passes" {
-  step a; fake_action a
-  touch "$T/state/a"
-  mip run --non-interactive
-  [ -z "$(events)" ]
-  run mip run --force a --non-interactive
-  [ "$status" -eq 0 ]
-  grep -q 'start a' "$T/events"
-}
-
-@test "--upgrade calls upgrade() on satisfied Steps; without one it is a skip" {
-  step a; step b
-  fake_action a --upgrade; fake_action b
-  touch "$T/state/a" "$T/state/b"
-  run mip run --upgrade --non-interactive
-  [ "$status" -eq 0 ]
-  [ "$(events)" = "upgrade a" ]
-  [[ "$output" == *"a "*"upgraded"* ]]
-  [[ "$output" == *"b "*"done"* ]]
-}
-
 @test "non-interactive: unsatisfied Interactive Step is deferred and blocks dependents only" {
   step login
   step needs-login login; step other
@@ -157,13 +136,6 @@ setup() { setup_pipeline; }
   rm "$T/state/x"; : >"$T/events"
   run mip run --force x --non-interactive    # forced: runs
   grep -q 'end x' "$T/events"
-}
-
-@test "optional Interactive Step: not chosen, it is skipped as optional, not deferred" {
-  step x; fake_action x --optional --interactive
-  run mip run --non-interactive
-  [[ "$output" == *"x "*"optional"* ]] && [[ "$output" != *"deferred"* ]]
-  ! grep -q 'start x' "$T/events"
 }
 
 @test "non-interactive: satisfied Interactive Step counts as done" {
@@ -230,6 +202,16 @@ setup() { setup_pipeline; }
   bash "$ROOT/lib/step.sh" "$MIP_ACTIONS_DIR/a.sh" --defines upgrade
   run bash "$ROOT/lib/step.sh" "$MIP_ACTIONS_DIR/a.sh" --defines note
   [ "$status" -eq 1 ]
+}
+
+@test "notes: a note() that fails is logged and does not fail the Step" {
+  step a
+  printf '%s\n' '# summary: a' 'check() { [ -f "$T/state/a" ]; }' 'run() { touch "$T/state/a"; }' \
+    'note() { echo "broken note" >&2; return 1; }' >"$MIP_ACTIONS_DIR/a.sh"
+  run mip run --non-interactive
+  [ "$status" -eq 0 ] && [[ "$output" == *"✓ a "* ]]
+  grep -q 'broken note' "$HOME/.local/state/my-init-pipeline/runs/latest/a.log"
+  grep -q 'note() failed' "$HOME/.local/state/my-init-pipeline/runs/latest/a.log"
 }
 
 @test "--upgrade announces upgrading" {
@@ -374,6 +356,8 @@ plan_of() { awk -v s="$1" '$1 == s { print $2 }' <<<"$output"; }
   run mip run --upgrade --force forced --non-interactive
   [[ "$output" == *"✓ ran "* && "$output" == *"= isdone "* && "$output" == *"↑ up "* && "$output" == *"- off "* ]]
   [[ "$output" == *"○ opt "* && "$output" == *"⏸ login "* && "$output" == *"✓ forced "* ]]
+  # Only the upgrade, the Step with work to do and the forced one did anything.
+  [ "$(events | sort)" = "$(printf '%s\n' 'upgrade up' 'start ran tty=n' 'end ran' 'start forced tty=n' 'end forced' | sort)" ]
 }
 
 @test "an Interactive Step is upgraded on a terminal; without one its upgrade is skipped and nothing is blocked" {

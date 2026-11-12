@@ -1,5 +1,5 @@
 # The Action descriptor: what the runner knows about a Step's Action, read one
-# way. Sourced by init.sh after lib/pipeline.sh (it needs action_file).
+# way. Sourced by init.sh alongside lib/pipeline.sh, whose action_file it calls.
 #
 # An Action states static facts in its header comment (summary, check,
 # interactive: yes, optional: yes, notes), which is read without running the

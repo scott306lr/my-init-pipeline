@@ -1,5 +1,7 @@
 # Pipeline model and scheduler. Sourced by init.sh; expects MIP_ROOT, MIP_CONF
-# and MIP_ACTIONS_DIR to be set and lib/common.sh and lib/action.sh to be loaded.
+# and MIP_ACTIONS_DIR to be set and lib/common.sh to be loaded. Its functions
+# call lib/action.sh's, and lib/action.sh's call action_file here, so both
+# files are sourced before either is used.
 
 # Step results: word -> "MARK KIND". KIND says what the result means for the
 # Run: ok (it worked), skip (nothing to do), fail (the Run fails), left (not
@@ -114,30 +116,30 @@ required_by() {
 
 # ── the Plan ──────────────────────────────────────────────────────────────────
 
-# What this Run was asked to do, filled by pipeline_choose and read by
-# pipeline_run and the dry run. FORCED and UPGRADED are its inputs (init.sh
-# sets them from --force and the checklist's ticks).
-declare -A FORCED=()       # step -> 1: run it even if its Check passes
-declare -A UPGRADED=()     # step -> 1: upgrade it if its Check passes
-declare -a PLAN=()         # the selected Steps, in dependency order
+# What this Run was asked to do. init.sh fills FORCE and UPGRADE (from --force
+# and the checklist's ticks); pipeline_choose derives the rest, which
+# pipeline_run and the dry run read.
+declare -A FORCE=()        # step -> 1: run it even if its Check passes
+declare -A UPGRADE=()      # step -> 1: upgrade it if its Check passes
+declare -a SELECTED=()     # the Steps this Run covers, in dependency order
 declare -A STEP_MODE=()    # step -> install | upgrade | force: what to do when its Check passes
 declare -A UNCHOSEN=()     # step -> 1: an Optional Step nobody chose: skipped while it has work to do
 
 # pipeline_choose MODE [TARGET...] — select TARGETs and what they require (the
-# whole Pipeline when none is named) into PLAN, and settle each selected
+# whole Pipeline when none is named) into SELECTED, and settle each selected
 # Step's mode and whether it is an Optional Step left unchosen. MODE (install |
-# upgrade) is the mode of every Step not in FORCED or UPGRADED. Named and
+# upgrade) is the mode of every Step in neither FORCE nor UPGRADE. Named and
 # forced Steps count as chosen.
 pipeline_choose() {
   local mode="$1" s
   local -A chosen=()
   shift
   STEP_MODE=() UNCHOSEN=()
-  mapfile -t PLAN < <(pipeline_select "$@")
-  for s in "$@" "${!FORCED[@]}"; do chosen[$s]=1; done
-  for s in "${PLAN[@]}"; do
-    if [ -n "${FORCED[$s]:-}" ]; then STEP_MODE[$s]=force
-    elif [ -n "${UPGRADED[$s]:-}" ]; then STEP_MODE[$s]=upgrade
+  mapfile -t SELECTED < <(pipeline_select "$@")
+  for s in "$@" "${!FORCE[@]}"; do chosen[$s]=1; done
+  for s in "${SELECTED[@]}"; do
+    if [ -n "${FORCE[$s]:-}" ]; then STEP_MODE[$s]=force
+    elif [ -n "${UPGRADE[$s]:-}" ]; then STEP_MODE[$s]=upgrade
     else STEP_MODE[$s]="$mode"; fi
     if is_optional "$s" && [ -z "${chosen[$s]:-}" ]; then UNCHOSEN[$s]=1; fi
   done
@@ -176,98 +178,80 @@ step_plan() {
   else echo run; fi
 }
 
-# step_plan_for STEP CHECK INTERACTIVE — step_plan for STEP with this Run's
-# choices (STEP_MODE, UNCHOSEN, MIP_INTERACTIVE). CHECK is the Step's Check
-# result, which the caller has just taken; INTERACTIVE is yes | no.
-step_plan_for() {
-  local step="$1" check="$2" mode="${STEP_MODE[$1]:-install}" unchosen=no terminal=no has_upgrade=no
+# step_decide STEP INTERACTIVE — take STEP's Check and print its Plan for this
+# Run. It only gathers step_plan's inputs (the Check, this Run's choices, what
+# the Action defines) and applies no rule itself, so it takes the Check and
+# asks about upgrade() even where the Plan will not turn on them. INTERACTIVE
+# is yes | no. The Check's output goes to fd 9.
+step_decide() {
+  local step="$1" rc=0 unchosen=no terminal=no has_upgrade=no
+  echo "-- check" >&9
+  step_call "$step" check >&9 2>&9 || rc=$?
   if [ -n "${UNCHOSEN[$step]:-}" ]; then unchosen=yes; fi
   if [ "${MIP_INTERACTIVE:-0}" = 1 ]; then terminal=yes; fi
-  if [ "$mode" = upgrade ] && [ "$check" = "done" ] && action_defines "$step" upgrade; then has_upgrade=yes; fi
-  step_plan "$check" "$mode" "$unchosen" "$3" "$terminal" "$has_upgrade"
+  if action_defines "$step" upgrade; then has_upgrade=yes; fi
+  step_plan "$(check_word "$rc")" "${STEP_MODE[$step]:-install}" "$unchosen" "$2" "$terminal" "$has_upgrade"
 }
 
 # ── execution ─────────────────────────────────────────────────────────────────
 
-# step_act STEP PLAN — do the work of a run or upgrade Plan. The Action's own
-# output goes to stdout and stderr; progress lines and the Check after a run
-# go to fd 9, which the caller points at the Step's log.
-step_act() {
-  local step="$1"
-  case "$2" in
-    upgrade)
-      echo "-- upgrade" >&9
-      step_call "$step" upgrade ;;
-    run)
-      echo "-- run" >&9
-      step_call "$step" run || return 1
-      echo "-- check (after run)" >&9
-      if ! step_call "$step" check >&9 2>&9; then
-        echo "check still fails after run" >&9
-        return 1
-      fi ;;
-  esac
-}
+# The Plans that do work: plan -> "STARTED RESULT", the word announced while
+# the Step works and its result word when the work succeeds. Each is also the
+# name of the Action function that does the work.
+declare -A WORK=([run]="installing ran" [upgrade]="upgrading upgraded")
 
-# step_finish STEP PLAN STATUS — record how a run or upgrade Plan ended: the
-# result word in the log and the result file, and the Step's Note, if it leaves
-# one (note() gets the result word).
-step_finish() {
-  local step="$1" result=failed
-  if [ "$3" = 0 ]; then
-    case "$2" in run) result=ran ;; upgrade) result=upgraded ;; esac
-    step_call "$step" note "$result" >"$RUN_DIR/$step.note" 2>/dev/null || true
+# step_execute STEP INTERACTIVE — one Step of the Run: take its Check, plan,
+# and do the work the Plan calls for, leaving the result word in
+# RUN_DIR/STEP.result. INTERACTIVE (yes | no) says how the work is wired:
+#   no   in the background: all output goes to the Step's log
+#   yes  by the scheduler itself, owning the terminal: no redirection, so
+#        prompts and tty detection work; only bookkeeping goes to the log
+step_execute() {
+  local step="$1" interactive="$2" log="$RUN_DIR/$1.log" plan result rc=0
+  echo "== $step (action: ${ACTION[$step]}, ${STEP_MODE[$step]:-install}$([ "$interactive" = yes ] && echo ', interactive')) $(date '+%F %T')" >>"$log"
+  plan="$(step_decide "$step" "$interactive" 9>>"$log")"
+  if [[ -v WORK[$plan] ]]; then
+    if [ "$interactive" = yes ]; then
+      printf '▶ %s (interactive)\n' "$step"
+      step_work "$step" "$plan" </dev/tty 9>>"$log" || rc=$?
+    else
+      echo "${WORK[$plan]% *}" >"$RUN_DIR/$step.started"
+      step_work "$step" "$plan" >>"$log" 2>&1 9>>"$log" || rc=$?
+    fi
+    result=failed
+    if [ "$rc" = 0 ]; then
+      result="${WORK[$plan]#* }"
+      step_note "$step" "$result"
+    fi
+  else
+    result="$plan"   # a Plan that does no work is the result
   fi
-  echo "RESULT $result" >>"$RUN_DIR/$step.log"
+  echo "RESULT $result" >>"$log"
   printf '%s\n' "$result" >"$RUN_DIR/$step.result"
 }
 
-# step_skip STEP PLAN — record a Plan that does no work (na, done, optional,
-# deferred): the Plan is the result.
-step_skip() {
-  echo "RESULT $2" >>"$RUN_DIR/$1.log"
-  printf '%s\n' "$2" >"$RUN_DIR/$1.result"
-}
-
-# step_job STEP — a Step in the background: take its Check, plan, act. All
-# output goes to the Step's log; the result is left in a file.
-step_job() {
-  local step="$1" mode="${STEP_MODE[$1]:-install}" log="$RUN_DIR/$1.log" check=todo rc=0 plan
-  {
-    echo "== $step (action: ${ACTION[$step]}, $mode) $(date '+%F %T')"
-    if [ "$mode" != force ]; then
-      echo "-- check"
-      step_call "$step" check || rc=$?
-      check="$(check_word "$rc")"
+# step_work STEP PLAN — call the Action function a working Plan names; after
+# run(), the Check decides success. The Action's own output goes to stdout and
+# stderr; progress lines and that Check's output go to fd 9.
+step_work() {
+  local step="$1" plan="$2"
+  echo "-- $plan" >&9
+  step_call "$step" "$plan" || return 1
+  if [ "$plan" = run ]; then
+    echo "-- check (after run)" >&9
+    if ! step_call "$step" check >&9 2>&9; then
+      echo "check still fails after run" >&9
+      return 1
     fi
-  } >>"$log" 2>&1
-  plan="$(step_plan_for "$step" "$check" no)"
-  case "$plan" in
-    run | upgrade)
-      case "$plan" in run) echo installing ;; upgrade) echo upgrading ;; esac >"$RUN_DIR/$step.started"
-      rc=0
-      step_act "$step" "$plan" >>"$log" 2>&1 9>>"$log" || rc=$?
-      step_finish "$step" "$plan" "$rc" ;;
-    *) step_skip "$step" "$plan" ;;
-  esac
+  fi
 }
 
-# step_foreground STEP — an Interactive Step, decided and run by the scheduler
-# itself: take its Check, plan, and act only when there is work and a
-# terminal. Then it owns the terminal: no redirection, so prompts and tty
-# detection work, and only the runner's own bookkeeping goes to the log.
-step_foreground() {
-  local step="$1" mode="${STEP_MODE[$1]:-install}" log="$RUN_DIR/$1.log" check=todo rc=0 plan
-  echo "== $step (interactive, $mode) $(date '+%F %T')" >>"$log"
-  if [ "$mode" != force ]; then check="$(check_status "$step")"; fi
-  plan="$(step_plan_for "$step" "$check" yes)"
-  case "$plan" in
-    run | upgrade)
-      printf '▶ %s (interactive)\n' "$step"
-      step_act "$step" "$plan" </dev/tty 9>>"$log" || rc=$?
-      step_finish "$step" "$plan" "$rc" ;;
-    *) step_skip "$step" "$plan" ;;
-  esac
+# step_note STEP RESULT — leave the Note of a Step that worked, if its Action
+# writes one; note() gets the result word. A note() that fails is logged, and
+# does not fail the Step.
+step_note() {
+  action_defines "$1" note || return 0
+  step_call "$1" note "$2" >"$RUN_DIR/$1.note" 2>>"$RUN_DIR/$1.log" || echo "note() failed" >>"$RUN_DIR/$1.log"
 }
 
 report() {
@@ -285,26 +269,26 @@ report() {
 is_satisfied() { case "$(result_kind "$1")" in ok | skip) return 0 ;; esac; return 1; }
 is_dead() { case "$1" in failed | deferred | blocked | aborted) return 0 ;; esac; return 1; }
 
-# pipeline_run — run PLAN as pipeline_choose left it: schedule its Steps as
-# what they require is satisfied, up to MIP_JOBS at a time, taking the
-# terminal for Interactive ones when MIP_INTERACTIVE is 1. Logs and results go
-# to a new RUN_DIR under the state directory. Returns 1 if any Step failed.
+# pipeline_run — run the SELECTED Steps as pipeline_choose left them: start
+# each once what it requires is satisfied, up to MIP_JOBS at a time, taking
+# the terminal for Interactive ones when MIP_INTERACTIVE is 1. Logs and
+# results go to a new RUN_DIR under the state directory. Returns 1 if any
+# Step failed.
 pipeline_run() {
-  local -a plan=("${PLAN[@]}")
   local -A state=() pid=() start=() announced=()
   local s d r ready running=0 abort=0 progressed ticker="" last_change=$SECONDS
   local heartbeat="${MIP_HEARTBEAT:-30}"
 
   RUN_DIR="$MIP_STATE_DIR/runs/$(date +%Y%m%d-%H%M%S)-$$"
   mkdir -p "$RUN_DIR" && ln -sfn "$RUN_DIR" "$MIP_STATE_DIR/runs/latest"
-  for s in "${plan[@]}"; do state[$s]=pending; done
+  for s in "${SELECTED[@]}"; do state[$s]=pending; done
   trap 'kill $(jobs -p) 2>/dev/null; exit 130' INT TERM
 
   while :; do
     # Announce background Steps that got past their Check and are now working.
     # Printed from here (not the job) so output never interleaves with an
     # Interactive Step's prompt; while one runs, these wait their turn.
-    for s in "${plan[@]}"; do
+    for s in "${SELECTED[@]}"; do
       if [ "${state[$s]}" != running ] || [ -n "${announced[$s]:-}" ] || [ ! -f "$RUN_DIR/$s.started" ]; then
         continue
       fi
@@ -314,7 +298,7 @@ pipeline_run() {
     done
 
     # Collect finished background Steps.
-    for s in "${plan[@]}"; do
+    for s in "${SELECTED[@]}"; do
       [ "${state[$s]}" = running ] || continue
       if [ -f "$RUN_DIR/$s.result" ]; then
         r="$(cat "$RUN_DIR/$s.result")"
@@ -333,7 +317,7 @@ pipeline_run() {
     progressed=1
     while [ "$progressed" = 1 ]; do
       progressed=0
-      for s in "${plan[@]}"; do
+      for s in "${SELECTED[@]}"; do
         [ "${state[$s]}" = pending ] || continue
         for d in ${REQ[$s]}; do
           if is_dead "${state[$d]:-}"; then
@@ -346,7 +330,7 @@ pipeline_run() {
     # Start whatever is ready.
     progressed=0
     if [ "$abort" = 0 ]; then
-      for s in "${plan[@]}"; do
+      for s in "${SELECTED[@]}"; do
         [ "${state[$s]}" = pending ] || continue
         ready=1
         for d in ${REQ[$s]}; do is_satisfied "${state[$d]:-}" || { ready=0; break; }; done
@@ -354,7 +338,7 @@ pipeline_run() {
 
         if is_interactive "$s"; then
           start[$s]=$SECONDS
-          step_foreground "$s"
+          step_execute "$s" yes
           r="$(cat "$RUN_DIR/$s.result")"
           state[$s]="$r"; report "$s" "$r"
           is_satisfied "$r" || { [ "$r" = failed ] && abort=1; }
@@ -364,7 +348,7 @@ pipeline_run() {
 
         [ "$running" -lt "$MIP_JOBS" ] || continue
         start[$s]=$SECONDS
-        step_job "$s" </dev/null >/dev/null 2>&1 &
+        step_execute "$s" no </dev/null >/dev/null 2>&1 &
         pid[$s]=$!
         state[$s]=running; running=$((running + 1))
       done
@@ -381,7 +365,7 @@ pipeline_run() {
     wait -n 2>/dev/null || true
     if [ $((SECONDS - last_change)) -ge "$heartbeat" ]; then
       local busy=()
-      for s in "${plan[@]}"; do
+      for s in "${SELECTED[@]}"; do
         [ "${state[$s]}" = running ] && busy+=("$s ($((SECONDS - start[$s]))s)")
       done
       local joined
@@ -394,7 +378,7 @@ pipeline_run() {
   trap - INT TERM
 
   local failed=0 n_ok=0 n_skip=0 n_left=0
-  for s in "${plan[@]}"; do
+  for s in "${SELECTED[@]}"; do
     if [ "${state[$s]}" = pending ]; then state[$s]=aborted; report "$s" aborted; fi
     case "$(result_kind "${state[$s]}")" in
       ok) n_ok=$((n_ok + 1)) ;;
@@ -405,7 +389,7 @@ pipeline_run() {
   done
 
   local notes=""
-  for s in "${plan[@]}"; do
+  for s in "${SELECTED[@]}"; do
     [ -s "$RUN_DIR/$s.note" ] && notes+="$(sed "s/^/  [$s] /" "$RUN_DIR/$s.note")"$'\n'
   done
   echo

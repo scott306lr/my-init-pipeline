@@ -63,6 +63,15 @@ plans() {
   "
 }
 
+@test "an Interactive Step with nothing to do takes no terminal: na and done are as for any Step" {
+  plans "
+    na    install  no  yes yes no  => na
+    na    install  no  yes no  no  => na
+    done  install  no  yes yes no  => done
+    done  install  no  yes no  no  => done
+  "
+}
+
 @test "an Interactive Step with work to do is deferred without a terminal, and runs with one" {
   plans "
     todo  install  no  yes no  no  => deferred
