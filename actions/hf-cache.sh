@@ -62,6 +62,7 @@ check() {
 run() {
   local folder legacy legacy_folder answer share="$HF_CACHE_SHARED" var src
   local -a vars=() sources=() dirs=()
+  local caches=""
   case "$share" in "" | yes | no) ;; *) die "HF_CACHE_SHARED must be yes, no or empty, got '$share'" ;; esac
   # Where the downloads are now, before anything changes, as VARIABLE SOURCE
   # pairs: where env.sh points each cache, else that cache in the relocated
@@ -92,10 +93,13 @@ run() {
       share=no
     fi
   fi
-  for var in "${vars[@]}"; do dirs+=("${HF_STATE[$var]}"); done
+  for var in "${vars[@]}"; do
+    dirs+=("${HF_STATE[$var]}")
+    caches+="${caches:+ and }${HF_STATE[$var]}"
+  done
   if mkdir -p "${dirs[@]}"; then hf_cache_state "$folder" || return 1; fi
   if [ "${HF_STATE[writable]}" != yes ]; then
-    die "cannot create or write to ${dirs[*]}: $folder needs root first; tick hf-export too (or run: ./init.sh run hf-export hf-cache), or ask an admin to run: admin/share-hf-cache.sh $folder"
+    die "cannot create or write to $caches: $folder needs root first; tick hf-export too (or run: ./init.sh run hf-export hf-cache), or ask an admin to run: admin/share-hf-cache.sh $folder"
   fi
   move_then_share "$folder" "$share" "${sources[@]}"
   for var in "${vars[@]}"; do

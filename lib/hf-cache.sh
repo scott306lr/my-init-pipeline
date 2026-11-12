@@ -11,8 +11,8 @@ HF_ADMIN_SCRIPT="$MIP_ROOT/admin/share-hf-cache.sh"
 hf_admin() { bash "$HF_ADMIN_SCRIPT" "$@"; }
 
 # hf_cache_state DIR — fill HF_STATE with the script's --state for DIR: folder,
-# home, owner, shared, writable, exported, and one key per cache variable (see
-# hf_cache_vars). Status 1, with the script's message, when DIR cannot be a
+# home, owner, shared, writable, exported, one key per cache variable, and
+# vars, their names (see hf_cache_vars). Status 1, with the script's message, when DIR cannot be a
 # Cache folder. It sets a variable, so call it directly, not in $(...); a
 # caller that must keep the HF_STATE it has declares `local -A HF_STATE` first.
 declare -A HF_STATE=()
@@ -20,18 +20,19 @@ hf_cache_state() {
   local out k v
   HF_STATE=()
   out="$(hf_admin --state "$1")" || return 1
-  while IFS='=' read -r k v; do HF_STATE[$k]="$v"; done <<<"$out"
+  while IFS='=' read -r k v; do
+    HF_STATE[$k]="$v"
+    case "$k" in *[!A-Z_]*) ;; *) HF_STATE[vars]+="${HF_STATE[vars]:+ }$k" ;; esac
+  done <<<"$out"
 }
 
 # hf_cache_vars — the variables that point into the folder HF_STATE describes
-# (HF_HUB_CACHE, HF_DATASETS_CACHE), one per line; HF_STATE[variable] is the
-# cache each points to. They are --state's keys in capitals, as the script's
-# header says.
+# (HF_HUB_CACHE, HF_DATASETS_CACHE), one per line, in the script's order;
+# HF_STATE[variable] is the cache each points to. They are --state's keys in
+# capitals, as the script's header says.
 hf_cache_vars() {
-  local k
-  for k in "${!HF_STATE[@]}"; do
-    case "$k" in *[!A-Z_]*) ;; *) printf '%s\n' "$k" ;; esac
-  done | sort
+  local var
+  for var in ${HF_STATE[vars]:-}; do printf '%s\n' "$var"; done
 }
 
 # hf_cache_mine_and_private — the directory HF_STATE describes holds only your
