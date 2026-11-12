@@ -48,24 +48,30 @@ hf_cache_folder() {
 }
 
 # hf_cache_recorded — the Cache folder env.sh records (the hf-cache Step's), or nothing.
-hf_cache_recorded() {
-  local hub
-  hub="$(env_value HF_HUB_CACHE)"
-  if [ -n "$hub" ]; then hf_admin --folder-of "$hub" "$(env_value HF_DATASETS_CACHE)"; fi
+hf_cache_recorded() { hf_admin --folder-in "$MIP_ENV_FILE"; }
+
+# hf_cache_layout — how a Cache folder is laid out, for a prompt: "hub/ and
+# datasets/". Read off the state of a folder that need not exist.
+hf_cache_layout() {
+  local -A HF_STATE=()
+  local var layout=""
+  hf_cache_state /any/cache-folder || return 0
+  for var in $(hf_cache_vars); do layout+="${layout:+ and }${HF_STATE[$var]##*/}/"; done
+  printf '%s\n' "$layout"
 }
 
 # hf_cache_resolve — the Cache folder already decided, first found of: the
 # HF_CACHE_DIR setting, the one env.sh records (the hf-cache Step's), the one
 # login shells get (read fresh, so root's export from earlier in this Run
-# counts), the folder holding an HF_HUB_CACHE=<folder>/hub this shell has (an
-# older export). Nothing when none is; status 1 when the setting cannot be a
-# Cache folder.
+# counts), the folder this shell's first cache variable points into (an older
+# export set only HF_HUB_CACHE). Nothing when none is; status 1 when the
+# setting cannot be a Cache folder.
 hf_cache_resolve() {
   local f
   if [ -n "${HF_CACHE_DIR:-}" ]; then hf_cache_folder "$HF_CACHE_DIR"; return; fi
   f="$(hf_cache_recorded)"
   [ -n "$f" ] || f="$(hf_admin --exported-folder)"
-  if [ -z "$f" ] && [ -n "${HF_HUB_CACHE:-}" ]; then f="$(hf_admin --folder-of "$HF_HUB_CACHE")"; fi
+  [ -n "$f" ] || f="$(hf_admin --folder-in-env)"
   if [ -n "$f" ]; then printf '%s\n' "$f"; fi
 }
 

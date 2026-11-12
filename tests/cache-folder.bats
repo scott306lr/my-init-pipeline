@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# What a cache folder is, as admin/share-hf-cache.sh reports it (docs/adr/0003):
+# What a Cache folder is, as admin/share-hf-cache.sh reports it (docs/adr/0003):
 # the queries the hf-cache and hf-export Steps ask. What needs root (sharing
 # other users' entries, the real /etc export) is in tests/share-root.sh.
 
@@ -75,12 +75,28 @@ state_is() {
   [ -z "$(admin --exported-folder)" ]
 }
 
-@test "--folder-of: the folder whose hub/ and datasets/ these are, or nothing" {
-  [ "$(admin --folder-of /d/hf/hub /d/hf/datasets)" = /d/hf ]
-  [ "$(admin --folder-of /d/hf/hub)" = /d/hf ]
-  [ -z "$(admin --folder-of /d/hf/hub /e/datasets)" ]
-  [ -z "$(admin --folder-of /d/hf/hub "")" ]
-  [ -z "$(admin --folder-of /d/hf/models)" ]
-  [ "$(admin --folder-of /d/hf//hub)" = /d/hf ]          # printed as a cache folder
-  [ -z "$(admin --folder-of /hub)" ]                     # / cannot be one
+@test "--folder-in: the folder a file's cache variables point into, only when it sets them all to one folder" {
+  f="$T/vars.sh"
+  printf 'export HF_HUB_CACHE="/d/hf/hub"\nexport HF_DATASETS_CACHE="/d/hf/datasets"\n' >"$f"
+  [ "$(admin --folder-in "$f")" = /d/hf ]
+  printf 'export HF_HUB_CACHE="$HOME/hf//hub"\nexport HF_DATASETS_CACHE="$HOME/hf//datasets"\n' >"$f"
+  [ "$(admin --folder-in "$f")" = "$HOME/hf" ]            # printed as a Cache folder
+  printf 'export HF_HUB_CACHE="/d/hf/hub"\n' >"$f"
+  [ -z "$(HF_DATASETS_CACHE=/d/hf/datasets admin --folder-in "$f")" ]   # the file's own variables only
+  printf 'export HF_HUB_CACHE="/d/hf/hub"\nexport HF_DATASETS_CACHE="/e/datasets"\n' >"$f"
+  [ -z "$(admin --folder-in "$f")" ]
+  printf 'export HF_HUB_CACHE="/d/hf/models"\nexport HF_DATASETS_CACHE="/d/hf/datasets"\n' >"$f"
+  [ -z "$(admin --folder-in "$f")" ]
+  printf 'export HF_HUB_CACHE="/hub"\nexport HF_DATASETS_CACHE="/datasets"\n' >"$f"
+  [ -z "$(admin --folder-in "$f")" ]                      # / cannot be a Cache folder
+  printf 'echo noise; echo "$UNSET_VARIABLE"; false\nexport HF_HUB_CACHE=/d/hf/hub HF_DATASETS_CACHE=/d/hf/datasets\n' >"$f"
+  [ "$(admin --folder-in "$f")" = /d/hf ]                 # a shell setup's own output and failures do not matter
+  [ -z "$(admin --folder-in "$T/missing")" ]
+}
+
+@test "--folder-in-env: the folder the first cache variable in the environment points into" {
+  [ "$(HF_HUB_CACHE=/d/hf/hub admin --folder-in-env)" = /d/hf ]
+  [ "$(HF_HUB_CACHE=/d/hf/hub HF_DATASETS_CACHE=/e/datasets admin --folder-in-env)" = /d/hf ]
+  [ -z "$(HF_DATASETS_CACHE=/d/hf/datasets admin --folder-in-env)" ]
+  [ -z "$(HF_HUB_CACHE=/d/hf/models admin --folder-in-env)" ]
 }

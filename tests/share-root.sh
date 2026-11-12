@@ -2,7 +2,7 @@
 # Sharing a Hugging Face cache folder with every user, as root on a throwaway machine (it adds
 # users and writes /etc/profile.d): run by tests/admin.sh, in ubuntu:22.04
 # locally and directly on the CI runner.
-#   - root runs admin/share-hf-cache.sh on a cache folder: users with umask 077
+#   - root runs admin/share-hf-cache.sh on a Cache folder: users with umask 077
 #     add, update and replace each other's entries in hub/ and datasets/
 #     through a 700 parent, a login shell carries HF_HUB_CACHE and
 #     HF_DATASETS_CACHE, the old export file goes, a re-run stacks nothing and

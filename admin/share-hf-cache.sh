@@ -26,14 +26,20 @@
 #                                                                      /etc/environment both carry it
 #                                           home, owner and shared hold for any directory, so the
 #                                           Steps also ask them about one cache on its own.
-#   admin/share-hf-cache.sh --folder-of HUB [DATASETS]
-#                                           print the cache folder whose hub/ is HUB (and whose
-#                                           datasets/ is DATASETS, when given); nothing if none
+#   admin/share-hf-cache.sh --folder-in FILE
+#                                           print the cache folder the cache variables FILE sets
+#                                           point into (FILE is shell: an env file, a profile);
+#                                           nothing unless it sets them all, to one folder
+#   admin/share-hf-cache.sh --folder-in-env
+#                                           print the cache folder the first cache variable in
+#                                           the environment points into, whatever the others
+#                                           say (an older export set only that one)
 #   admin/share-hf-cache.sh --exported-folder
-#                                           print the folder login shells get, if any. It reads
-#                                           the login profile alone, so a half-written export
-#                                           still names its folder, whose state then says
-#                                           exported=no and a re-run as root repairs.
+#                                           print the folder login shells get, if any: --folder-in
+#                                           the login profile. It reads the profile alone, so a
+#                                           half-written export still names its folder, whose
+#                                           state then says exported=no and a re-run as root
+#                                           repairs.
 #
 # DIR must be an absolute path other than /; anything else exits 1.
 #
@@ -65,8 +71,9 @@ main() {
   PROFILE="${MIP_HF_PROFILE:-/etc/profile.d/hf-cache.sh}"       # override: tests
   ENVIRONMENT="${MIP_HF_ENVIRONMENT:-/etc/environment}"         # override: tests
   case "${1:-}" in
-    --exported-folder) [ $# -eq 1 ] || usage; exported_folder; return ;;
-    --folder-of) [ $# -eq 2 ] || [ $# -eq 3 ] || usage; folder_of "${@:2}"; return ;;
+    --exported-folder) [ $# -eq 1 ] || usage; folder_in "$PROFILE"; return ;;
+    --folder-in) [ $# -eq 2 ] || usage; folder_in "$2"; return ;;
+    --folder-in-env) [ $# -eq 1 ] || usage; folder_in_env; return ;;
     --state) [ $# -eq 2 ] || usage; dir="$(cache_folder "$2")"; caches_of "$dir"; state "$dir"; return ;;
     -*) usage ;;
   esac
@@ -167,9 +174,8 @@ join_group() {
 
 # caches_of DIR — set CACHE_VARS and CACHE_DIRS to the caches of Cache folder
 # DIR: the variables Hugging Face reads, and where in DIR each points, in the
-# same order. The layout is written down here and in folder_of, its inverse;
-# exported_folder, which reads those variables back from the profile, is the
-# only other code that names them. main calls it once, for the DIR it is given.
+# same order. This is the one place the layout is written down. main calls it
+# once, for the DIR it is given.
 caches_of() {
   CACHE_VARS=(HF_HUB_CACHE HF_DATASETS_CACHE)
   CACHE_DIRS=("$1/hub" "$1/datasets")
@@ -183,11 +189,44 @@ cache_lines() {
   for i in "${!CACHE_VARS[@]}"; do printf "$1" "${CACHE_VARS[i]}" "${CACHE_DIRS[i]}"; done
 }
 
-# folder_of HUB [DATASETS] — the Cache folder holding them, when HUB is
-# <folder>/hub and DATASETS (if given) is <folder>/datasets; else nothing.
+# folder_of PATH... — caches_of backwards: the Cache folder whose caches are
+# these PATHs, given in CACHE_VARS order (fewer than all of them checks only
+# those); nothing when they are not the caches of one folder.
 folder_of() {
-  case "$1" in */hub) ;; *) return 0 ;; esac
-  if [ $# -eq 1 ] || [ "$2" = "${1%/hub}/datasets" ]; then as_cache_folder "${1%/hub}" || true; fi
+  local -a CACHE_VARS=() CACHE_DIRS=()   # of the folder "", so each is its cache's path within a folder
+  local folder path i=0
+  caches_of ""
+  case "${1:-}" in *"${CACHE_DIRS[0]}") folder="${1%"${CACHE_DIRS[0]}"}" ;; *) return 0 ;; esac
+  for path in "$@"; do
+    [ "$path" = "$folder${CACHE_DIRS[i]}" ] || return 0
+    i=$((i + 1))
+  done
+  as_cache_folder "$folder" || true
+}
+
+# folder_in FILE — the Cache folder the cache variables FILE sets point into;
+# nothing unless FILE sets every one of them, to one folder. FILE is sourced in
+# a subshell that starts without those variables, so only FILE's own count.
+folder_in() {
+  [ -f "$1" ] || return 0
+  (
+    set +eu   # FILE is somebody's shell setup, not this script
+    caches_of ""
+    unset "${CACHE_VARS[@]}"
+    # shellcheck disable=SC1090
+    . "$1" >/dev/null 2>&1
+    paths=()
+    for var in "${CACHE_VARS[@]}"; do paths+=("${!var:-}"); done
+    folder_of "${paths[@]}"
+  )
+}
+
+# folder_in_env — the Cache folder the first cache variable in the environment
+# points into, whatever the others say; nothing when it is unset.
+folder_in_env() {
+  local -a CACHE_VARS=() CACHE_DIRS=()
+  caches_of ""
+  folder_of "${!CACHE_VARS[0]:-}"
 }
 
 # as_cache_folder PATH — PATH as a Cache folder: ~ expanded, no trailing /.
@@ -220,16 +259,6 @@ state() {
     "$home" "$owner" "$(how_shared "$dir")" "$writable" "$exported"
 }
 
-# exported_folder — the folder whose caches PROFILE exports, or nothing.
-exported_folder() {
-  [ -f "$PROFILE" ] || return 0
-  (
-    # shellcheck disable=SC1090
-    . "$PROFILE"
-    if [ -n "${HF_HUB_CACHE:-}" ]; then folder_of "$HF_HUB_CACHE" "${HF_DATASETS_CACHE:-}"; fi
-  )
-}
-
 # is_exported — both PROFILE and ENVIRONMENT export the caches caches_of set.
 is_exported() {
   local i
@@ -240,7 +269,7 @@ is_exported() {
 }
 
 usage() {
-  echo "usage: share-hf-cache.sh DIR | --state DIR | --folder-of HUB [DATASETS] | --exported-folder" >&2
+  echo "usage: share-hf-cache.sh DIR | --state DIR | --folder-in FILE | --folder-in-env | --exported-folder" >&2
   exit 2
 }
 

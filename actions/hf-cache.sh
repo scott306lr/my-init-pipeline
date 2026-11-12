@@ -80,7 +80,7 @@ run() {
   folder="$(hf_cache_resolve)" || return 1
   if [ -z "$HF_CACHE_DIR" ]; then
     if [ -z "$folder" ] && [ -n "$legacy_folder" ] && ! [ "$legacy_folder" -ef "$HF_HOME_DEFAULT" ]; then folder="$legacy_folder"; fi
-    folder="$(hf_ask_folder "Hugging Face cache folder (holds hub/ and datasets/)" "${folder:-$(suggestion)}")" || return 1
+    folder="$(hf_ask_folder "Hugging Face cache folder (holds $(hf_cache_layout))" "${folder:-$(suggestion)}")" || return 1
   fi
   if [ -n "$legacy" ]; then restore_home "${legacy_folder:-}"; fi
   # From here on HF_STATE describes the chosen folder.

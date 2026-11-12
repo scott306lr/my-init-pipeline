@@ -5,7 +5,6 @@ load helpers
 
 setup() {
   setup_pipeline
-  unset HF_HUB_CACHE HF_DATASETS_CACHE HF_HOME   # the developer's own Hugging Face settings
   export HF_CACHE_SUGGESTED="$T/suggested"   # never the real /shared
   export MIP_USER_CONFIG="$ROOT/config.sh"
 }

@@ -20,6 +20,7 @@ setup_pipeline() {
   export HOME="$T/home"
   export MIP_CONF="$T/pipeline.conf" MIP_ACTIONS_DIR="$T/actions" MIP_USER_CONFIG="$T/config.sh"
   unset XDG_CONFIG_HOME XDG_STATE_HOME
+  unset HF_HUB_CACHE HF_DATASETS_CACHE HF_HOME   # the developer's own Hugging Face settings
   export MIP_GUM="$T/no-gum"   # never download the checklist's gum; fake_gum replaces it
   export MIP_HF_PROFILE="$T/profile.d/hf-cache.sh"   # never this machine's /etc/profile.d
   export MIP_HF_ENVIRONMENT="$T/environment"         # nor its /etc/environment
@@ -121,10 +122,15 @@ line_of() { grep -n -m1 -- "$1" "$T/events" | cut -d: -f1; }
 hf_state() { bash "$ROOT/admin/share-hf-cache.sh" --state "$1" | sed -n "s/^$2=//p"; }
 
 # export_for_everyone DIR — the two files root's run of the script leaves for
-# DIR, written to the test's stand-ins for /etc/profile.d and /etc/environment.
-# tests/share-root.sh checks that root's real run writes what --state accepts.
+# DIR, written to the test's stand-ins for /etc/profile.d and /etc/environment
+# from the caches --state names. tests/share-root.sh checks that root's real
+# run writes what --state accepts.
 export_for_everyone() {
+  local var path
   mkdir -p "$(dirname "$MIP_HF_PROFILE")"
-  printf 'export HF_HUB_CACHE=%q\nexport HF_DATASETS_CACHE=%q\n' "$1/hub" "$1/datasets" >"$MIP_HF_PROFILE"
-  printf 'HF_HUB_CACHE=%s\nHF_DATASETS_CACHE=%s\n' "$1/hub" "$1/datasets" >>"$MIP_HF_ENVIRONMENT"
+  : >"$MIP_HF_PROFILE"
+  while IFS='=' read -r var path; do
+    printf 'export %s=%q\n' "$var" "$path" >>"$MIP_HF_PROFILE"
+    printf '%s=%s\n' "$var" "$path" >>"$MIP_HF_ENVIRONMENT"
+  done < <(bash "$ROOT/admin/share-hf-cache.sh" --state "$1" | grep '^[A-Z_]*=')
 }

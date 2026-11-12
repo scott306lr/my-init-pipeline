@@ -38,7 +38,7 @@ run() {
   local folder
   folder="$(default_folder)" || return 1
   if [ -z "$HF_CACHE_DIR" ]; then
-    folder="$(hf_ask_folder "Folder to share with every user of this server (holds hub/ and datasets/)" "$folder")" || return 1
+    folder="$(hf_ask_folder "Folder to share with every user of this server (holds $(hf_cache_layout))" "$folder")" || return 1
   fi
   hf_cache_state "$folder" || return 1
   if [ "${HF_STATE[home]}" = yes ]; then die "$folder is in your home: a cache there is yours alone, so there is nothing to share"; fi
@@ -52,7 +52,7 @@ run() {
 
 note() { echo "Every user gets HF_HUB_CACHE and HF_DATASETS_CACHE in $(hf_admin --exported-folder) from their next login"; }
 
-# default_folder — the cache folder already decided (hf_cache_resolve), else
+# default_folder — the Cache folder already decided (hf_cache_resolve), else
 # HF_CACHE_SUGGESTED (root can create it wherever it is).
 default_folder() {
   local f
