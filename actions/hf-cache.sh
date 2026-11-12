@@ -60,24 +60,28 @@ check() {
 }
 
 run() {
-  local folder legacy answer share="$HF_CACHE_SHARED" var
+  local folder legacy legacy_folder answer share="$HF_CACHE_SHARED" var
   local -A from=() to=()
-  local -a moves=()
+  local -a vars=() moves=()
   case "$share" in "" | yes | no) ;; *) die "HF_CACHE_SHARED must be yes, no or empty, got '$share'" ;; esac
   # Where the downloads are now, before anything changes: where env.sh points
   # each cache, else that cache in the relocated HF_HOME or in HF's default.
+  # A relocated HF_HOME is read as a Cache folder, so its caches are found
+  # however it was spelled; one that cannot be a folder at all has none.
   legacy="$(legacy_home)"
-  hf_cache_state "${legacy:-$HF_HOME_DEFAULT}" || return 1
-  for var in $(hf_cache_vars); do
+  if [ -n "$legacy" ]; then legacy_folder="$(hf_cache_folder "$legacy" 2>/dev/null)" || legacy_folder=""; fi
+  hf_cache_state "${legacy_folder:-$HF_HOME_DEFAULT}" || return 1
+  mapfile -t vars < <(hf_cache_vars)
+  for var in "${vars[@]}"; do
     from[$var]="$(env_value "$var")"
     from[$var]="${from[$var]:-${HF_STATE[$var]}}"
   done
   folder="$(hf_cache_resolve)" || return 1
   if [ -z "$HF_CACHE_DIR" ]; then
-    if [ -z "$folder" ] && [ -n "$legacy" ] && ! [ "$legacy" -ef "$HF_HOME_DEFAULT" ]; then folder="$legacy"; fi
+    if [ -z "$folder" ] && [ -n "$legacy_folder" ] && ! [ "$legacy_folder" -ef "$HF_HOME_DEFAULT" ]; then folder="$legacy_folder"; fi
     folder="$(hf_ask_folder "Hugging Face cache folder (holds hub/ and datasets/)" "${folder:-$(suggestion)}")" || return 1
   fi
-  if [ -n "$legacy" ]; then restore_home "$legacy"; fi
+  if [ -n "$legacy" ]; then restore_home "${legacy_folder:-}"; fi
   hf_cache_state "$folder" || return 1
   if should_ask_to_share && [ -z "$share" ]; then
     # Enter shares; no answer at all (EOF) never does.
@@ -87,7 +91,7 @@ run() {
       share=no
     fi
   fi
-  for var in $(hf_cache_vars); do
+  for var in "${vars[@]}"; do
     to[$var]="${HF_STATE[$var]}"
     moves+=("${from[$var]}" "${to[$var]}")
   done
@@ -96,7 +100,7 @@ run() {
     die "cannot create or write to ${to[*]}: $folder needs root first; tick hf-export too (or run: ./init.sh run hf-export hf-cache), or ask an admin to run: admin/share-hf-cache.sh $folder"
   fi
   move_then_share "$folder" "$share" "${moves[@]}"
-  for var in "${!to[@]}"; do
+  for var in "${vars[@]}"; do
     add_env "$var" "${to[$var]/#$HOME/\$HOME}"
     info "$var = ${to[$var]}"
   done
@@ -122,8 +126,8 @@ should_ask_to_share() { [ "${HF_STATE[home]}" = no ] && hf_cache_mine_and_privat
 
 # move_then_share FOLDER SHARE [SRC DST]... — move your downloads from each
 # SRC into its DST (a cache of FOLDER), then share FOLDER when SHARE is yes or
-# it is shared already, as it stands once the caches exist: a new folder under
-# a setgid parent is. The one order that works: sharing covers the entries you
+# it is Shared already, as it stands once the caches exist: a new Cache folder
+# under a setgid parent is. The one order that works: sharing covers the entries you
 # own in FOLDER at that moment, so it has to come after whatever is moved in.
 move_then_share() {
   local folder="$1" share="$2"
@@ -193,21 +197,23 @@ legacy_home() {
   if [ -n "$d" ] || [ -L "$HF_HOME_DEFAULT" ]; then printf '%s\n' "${d:-$HF_HOME_DEFAULT}"; fi
 }
 
-# restore_home DIR — make ~/.cache/huggingface a real, private directory again,
-# moving in the entries of DIR you own (token, stored_tokens, xet/, …) except
-# its caches, and drop the HF_HOME export.
+# restore_home [FOLDER] — make ~/.cache/huggingface a real, private directory
+# again and drop the HF_HOME export. FOLDER is the relocated HF_HOME as a Cache
+# folder (as hf_cache_folder prints it), or nothing when it could not be one:
+# the entries of FOLDER you own (token, stored_tokens, xet/, …) move in, except
+# its caches.
 restore_home() {
-  local src="$1" e var
-  local -A HF_STATE=() cache=()   # DIR's state, not the caller's
+  local src="${1:-}" e var
+  local -A HF_STATE=() is_cache=()   # FOLDER's state, not the caller's
   if [ -L "$HF_HOME_DEFAULT" ]; then rm "$HF_HOME_DEFAULT"; fi
   mkdir -p "$HF_HOME_DEFAULT"
   chmod 700 "$HF_HOME_DEFAULT"
   if [ -d "$src" ] && ! [ "$src" -ef "$HF_HOME_DEFAULT" ]; then
     hf_cache_state "$src" || return 1
-    for var in $(hf_cache_vars); do cache[${HF_STATE[$var]}]=1; done
+    for var in $(hf_cache_vars); do is_cache[${HF_STATE[$var]}]=1; done
     shopt -s nullglob dotglob
-    for e in "$src"/*; do
-      if [ -n "${cache[$e]:-}" ]; then continue; fi
+    for e in "${HF_STATE[folder]}"/*; do
+      if [ -n "${is_cache[$e]:-}" ]; then continue; fi
       if [ -e "$HF_HOME_DEFAULT/${e##*/}" ] || [ ! -O "$e" ]; then warn "left $e where it is"; continue; fi
       mv "$e" "$HF_HOME_DEFAULT/"
       info "moved $e to $HF_HOME_DEFAULT"

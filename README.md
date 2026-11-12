@@ -108,7 +108,7 @@ cat ~/.local/state/my-init-pipeline/runs/latest/<step>.log
 ```
 
 An Interactive Step (gh-auth, hf-cache, hf-export) prints to your terminal; its
-log holds only the result.
+log holds only what its Check printed and the result.
 
 **"don't run my-init-pipeline as root".** Run it as yourself, without sudo. Steps
 that need root ask for your password themselves.

@@ -162,19 +162,20 @@ join_group() {
   find "$dir" -user "$me" -type f ! -path '*/blobs/*' -exec chmod g+rw {} +
 }
 
-# cache_vars DIR — the caches of cache folder DIR, one VARIABLE=PATH per line:
-# the variable Hugging Face reads, and where in DIR it points. With folder_of,
-# its inverse, this is the one place the layout is written down.
+# cache_vars DIR — the caches of Cache folder DIR, one VARIABLE=PATH per line:
+# the variable Hugging Face reads, and where in DIR it points. The layout is
+# written down here and in folder_of, its inverse; exported_folder, which reads
+# those variables back from the profile, is the only other code that names them.
 cache_vars() { printf 'HF_HUB_CACHE=%s\nHF_DATASETS_CACHE=%s\n' "$1/hub" "$1/datasets"; }
 
-# folder_of HUB [DATASETS] — the cache folder holding them, when HUB is
+# folder_of HUB [DATASETS] — the Cache folder holding them, when HUB is
 # <folder>/hub and DATASETS (if given) is <folder>/datasets; else nothing.
 folder_of() {
   case "$1" in */hub) ;; *) return 0 ;; esac
   if [ $# -eq 1 ] || [ "$2" = "${1%/hub}/datasets" ]; then as_cache_folder "${1%/hub}" || true; fi
 }
 
-# as_cache_folder PATH — PATH as a cache folder: ~ expanded, no trailing /.
+# as_cache_folder PATH — PATH as a Cache folder: ~ expanded, no trailing /.
 # Status 1, printing nothing, unless that is an absolute path other than /.
 as_cache_folder() {
   local f="${1/#\~/$HOME}"
@@ -182,12 +183,12 @@ as_cache_folder() {
   case "$f" in /?*) printf '%s\n' "$f" ;; *) return 1 ;; esac
 }
 
-# cache_folder PATH — as_cache_folder, or die saying what a cache folder must be.
+# cache_folder PATH — as_cache_folder, or die saying what a Cache folder must be.
 cache_folder() {
   as_cache_folder "$1" || die "the cache folder must be an absolute path other than /: ${1:-<empty>}"
 }
 
-# state DIR — the --state lines for cache folder DIR (see the top of this file).
+# state DIR — the --state lines for Cache folder DIR (see the top of this file).
 state() {
   local dir="$1" home=no owner=none writable=yes exported=no p
   if [[ "$(realpath -m "$dir")/" == "$(realpath -m "$HOME")/"* ]]; then home=yes; fi

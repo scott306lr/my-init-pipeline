@@ -266,6 +266,24 @@ exports() {
   HF_CACHE_DIR="$T/shared" action hf-cache check
 }
 
+@test "hf-cache: a relocated HF_HOME recorded with a trailing / still has its caches moved to the new folder, not home" {
+  mkdir -p "$T/old/hub/models--x" "$T/old/datasets/d" "$HOME/.config/my-init-pipeline"
+  printf tok >"$T/old/token"
+  printf 'export HF_HOME="%s/"\n' "$T/old" >"$(envf)"
+  HF_CACHE_DIR="$T/new" HF_CACHE_SHARED=no action hf-cache run </dev/null
+  [ -d "$T/new/hub/models--x" ] && [ -d "$T/new/datasets/d" ]
+  [ "$(cat "$HOME/.cache/huggingface/token")" = tok ]
+  [ ! -e "$HOME/.cache/huggingface/hub" ] && [ ! -e "$HOME/.cache/huggingface/datasets" ]
+}
+
+@test "hf-cache: an HF_HOME export that is no absolute path is dropped, not an error" {
+  mkdir -p "$HOME/.config/my-init-pipeline"
+  printf 'export HF_HOME="rel/hf"\n' >"$(envf)"
+  HF_CACHE_DIR="$T/new" HF_CACHE_SHARED=no action hf-cache run </dev/null
+  exports "$T/new"
+  ! grep -q '^export HF_HOME=' "$(envf)"
+}
+
 @test "hf-cache: the prompt defaults to the relocated HF_HOME; a name already at home is left in place" {
   mkdir -p "$T/old/hub" "$HOME/.cache/huggingface" "$HOME/.config/my-init-pipeline"
   printf old >"$T/old/token"; printf new >"$HOME/.cache/huggingface/token"

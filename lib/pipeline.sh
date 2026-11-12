@@ -224,7 +224,7 @@ step_execute() {
       step_note "$step" "$result"
     fi
   else
-    result="$plan"   # a Plan that does no work is the result
+    result="${plan:-failed}"   # a Plan that does no work is the result; none at all is a failure
   fi
   echo "RESULT $result" >>"$log"
   printf '%s\n' "$result" >"$RUN_DIR/$step.result"

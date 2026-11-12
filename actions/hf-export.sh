@@ -42,7 +42,7 @@ run() {
   fi
   hf_cache_state "$folder" || return 1
   if [ "${HF_STATE[home]}" = yes ]; then die "$folder is in your home: a cache there is yours alone, so there is nothing to share"; fi
-  local -a cmd=(sudo bash "$MIP_ROOT/admin/share-hf-cache.sh" "$folder")
+  local -a cmd=(sudo bash "$HF_ADMIN_SCRIPT" "$folder")
   if [ ! -t 0 ]; then cmd=(sudo -n "${cmd[@]:1}"); fi   # no terminal: sudo must not prompt
   warn "hf-export needs sudo: ${cmd[*]}"
   "${cmd[@]}" && return

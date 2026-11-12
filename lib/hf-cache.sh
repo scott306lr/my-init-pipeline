@@ -4,9 +4,11 @@
 # helpers ask it. What stays here is what only the Pipeline can see: which
 # folder this user's settings and env.sh point to.
 
-# hf_admin ARG... — admin/share-hf-cache.sh, as you. The one place that knows
-# where the script is.
-hf_admin() { bash "$MIP_ROOT/admin/share-hf-cache.sh" "$@"; }
+# The script that owns the Cache folder's rules. hf-export also runs it, under sudo.
+HF_ADMIN_SCRIPT="$MIP_ROOT/admin/share-hf-cache.sh"
+
+# hf_admin ARG... — that script, as you.
+hf_admin() { bash "$HF_ADMIN_SCRIPT" "$@"; }
 
 # hf_cache_state DIR — fill HF_STATE with the script's --state for DIR: folder,
 # home, owner, shared, writable, exported, and one key per cache variable (see

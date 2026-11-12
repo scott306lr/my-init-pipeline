@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
-# Runner behaviour against fake Actions: ordering, parallelism, skip/force,
-# failure handling, interactive Steps, validation, list/describe.
+# Runs against fake Actions: scheduling (order, parallelism, heartbeat, abort),
+# one Run per kind of outcome, the dry run, Notes, the checklist, validation,
+# list/describe. The rules for a Step's Plan are a table in tests/plan.bats.
 
 load helpers
 

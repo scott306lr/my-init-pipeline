@@ -1,5 +1,6 @@
 # The checklist `./init.sh run` shows on a terminal to choose Steps (ADR 0002).
-# Sourced by init.sh after lib/pipeline.sh.
+# Sourced by init.sh; uses lib/pipeline.sh's Step list and lib/action.sh's
+# descriptor (check_status, is_optional, action_field).
 
 # v0.17.0, not v2: gum v2's choose binds toggle to " ", but Bubble Tea v2 names
 # that key "space", so space never toggles there (ADR 0002).
