@@ -25,7 +25,7 @@ _Avoid_: service, app, stage.
 
 **Plan** — What a Run intends for each Step it selected, decided before that Step executes: run it, upgrade it, or skip it and why.
 
-**Result** — The word a Step ends a Run with: what happened to it, as opposed to what the Plan intended.
+**Result** — What happened to a Step in a Run (it ran, was upgraded, failed, or was skipped and why), as opposed to what the Plan intended.
 
 **Cache folder** — The one folder that holds a user's Hugging Face downloads, models and datasets together. Each user has one in effect at a time.
 

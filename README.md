@@ -159,7 +159,9 @@ default".
 runs only what isn't done, in dependency order and in parallel where it can.
 **Interactive** Steps take the terminal; without one they wait for a later Run.
 **Optional** Steps (`hf-export`, the only one using sudo) run only when you
-choose them. Vocabulary: [GLOSSARY.md](GLOSSARY.md). Design decisions:
+choose them. `./init.sh run --dry-run` prints the **Plan**: for each Step,
+whether the Run would run it, upgrade it, or skip it as done, na (does not
+apply on this server), optional or deferred. Vocabulary: [GLOSSARY.md](GLOSSARY.md). Design decisions:
 [docs/adr/](docs/adr/).
 
 ## Adding a Step
@@ -200,7 +202,8 @@ Conventions every Action follows:
   (helpers, documented there) and `config.sh` loaded. Logic two Actions share
   goes in `lib/`, in a file they source (as `lib/hf-cache.sh` is).
 - `upgrade()`, `note()` and `interactive()` are optional: define one only when
-  the Action has something to do there.
+  the Action has something to do there. The runner asks whether an Action
+  defines a function before calling it; calling one it lacks is status 127.
 - Header keys: `interactive: yes` if it may need a human, `optional: yes` if it
   should run only when chosen, `notes:` for anything `describe` should show.
 
