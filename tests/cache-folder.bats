@@ -19,7 +19,7 @@ state_is() {
 }
 
 @test "--state: the folder as a cache folder — trailing / dropped, ~ expanded, its two caches named" {
-  state_is "$T/f/" "folder=$T/f" "hub=$T/f/hub" "datasets=$T/f/datasets"
+  state_is "$T/f/" "folder=$T/f" "HF_HUB_CACHE=$T/f/hub" "HF_DATASETS_CACHE=$T/f/datasets"
   state_is '~/hf/' "folder=$HOME/hf" home=yes
   state_is "$HOME" home=yes
   state_is "$T/f" home=no
@@ -81,4 +81,6 @@ state_is() {
   [ -z "$(admin --folder-of /d/hf/hub /e/datasets)" ]
   [ -z "$(admin --folder-of /d/hf/hub "")" ]
   [ -z "$(admin --folder-of /d/hf/models)" ]
+  [ "$(admin --folder-of /d/hf//hub)" = /d/hf ]          # printed as a cache folder
+  [ -z "$(admin --folder-of /hub)" ]                     # / cannot be one
 }

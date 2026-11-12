@@ -120,10 +120,11 @@ line_of() { grep -n -m1 -- "$1" "$T/events" | cut -d: -f1; }
 # hf_state DIR KEY — one value of admin/share-hf-cache.sh --state DIR.
 hf_state() { bash "$ROOT/admin/share-hf-cache.sh" --state "$1" | sed -n "s/^$2=//p"; }
 
-# export_for_everyone DIR — what root's run of the script leaves, in the test's
-# stand-ins for /etc/profile.d and /etc/environment.
+# export_for_everyone DIR — the two files root's run of the script leaves for
+# DIR, written to the test's stand-ins for /etc/profile.d and /etc/environment.
+# tests/share-root.sh checks that root's real run writes what --state accepts.
 export_for_everyone() {
   mkdir -p "$(dirname "$MIP_HF_PROFILE")"
-  printf 'export HF_HUB_CACHE=%s/hub\nexport HF_DATASETS_CACHE=%s/datasets' "$1" "$1" >"$MIP_HF_PROFILE"
-  printf 'HF_HUB_CACHE=%s/hub\nHF_DATASETS_CACHE=%s/datasets\n' "$1" "$1" >>"$MIP_HF_ENVIRONMENT"
+  printf 'export HF_HUB_CACHE=%q\nexport HF_DATASETS_CACHE=%q\n' "$1/hub" "$1/datasets" >"$MIP_HF_PROFILE"
+  printf 'HF_HUB_CACHE=%s\nHF_DATASETS_CACHE=%s\n' "$1/hub" "$1/datasets" >>"$MIP_HF_ENVIRONMENT"
 }

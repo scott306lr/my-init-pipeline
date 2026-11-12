@@ -1,5 +1,5 @@
 # summary: Prepare and share the Hugging Face cache folder for every user, also users who don't run this Pipeline (sudo)
-# check:   the cache folder is HF_CACHE_DIR, else the one in effect, else HF_CACHE_SUGGESTED; not applicable when there is none or it is inside your home; else it is shared with every user and /etc/profile.d exports its hub/ and datasets/
+# check:   the cache folder is HF_CACHE_DIR, else the one in effect, else HF_CACHE_SUGGESTED; not applicable when there is none or it is inside your home; else it is shared with every user and both /etc/profile.d and /etc/environment export its hub/ and datasets/
 # interactive: yes
 # optional: yes
 # notes:   Optional, so it runs only when ticked in the checklist, named
@@ -29,7 +29,7 @@ check() {
   local folder
   folder="$(default_folder)" || return 1
   [ -n "$folder" ] || return 2
-  hf_cache_state "$folder"
+  hf_cache_state "$folder" || return 1
   [ "${HF_STATE[home]}" = no ] || return 2   # a cache in your home is yours alone
   [ "${HF_STATE[shared]}" != none ] && [ "${HF_STATE[exported]}" = yes ]
 }
@@ -40,7 +40,7 @@ run() {
   if [ -z "$HF_CACHE_DIR" ]; then
     folder="$(hf_ask_folder "Folder to share with every user of this server (holds hub/ and datasets/)" "$folder")" || return 1
   fi
-  hf_cache_state "$folder"
+  hf_cache_state "$folder" || return 1
   if [ "${HF_STATE[home]}" = yes ]; then die "$folder is in your home: a cache there is yours alone, so there is nothing to share"; fi
   local -a cmd=(sudo bash "$MIP_ROOT/admin/share-hf-cache.sh" "$folder")
   if [ ! -t 0 ]; then cmd=(sudo -n "${cmd[@]:1}"); fi   # no terminal: sudo must not prompt

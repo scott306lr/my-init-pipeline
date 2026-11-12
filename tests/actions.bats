@@ -503,6 +503,15 @@ shared_dir() { [ "$(hf_state "$1" shared)" = acl ]; }
   [ "$(stat -c %a "$T/grp/hub/blobs/12/1234")" = 444 ]   # blob payloads stay read-only
 }
 
+@test "hf-cache: a new folder that comes out group-shared (a setgid parent) is treated as shared, though it was not before it existed" {
+  mkdir -p "$T/grp" "$HOME/.cache/huggingface/hub/models--x"
+  chmod 2775 "$T/grp"
+  echo w >"$HOME/.cache/huggingface/hub/models--x/f"; chmod 600 "$HOME/.cache/huggingface/hub/models--x/f"
+  (umask 002; HF_CACHE_DIR="$T/grp/hf" HF_CACHE_SHARED=no action hf-cache run </dev/null)
+  [ "$(hf_state "$T/grp/hf" shared)" = group ]
+  [ "$(stat -c %a "$T/grp/hf/hub/models--x/f")" = 660 ]   # moved downloads join the group
+}
+
 @test "hf-cache and hf-export: / is refused as the cache folder, the same way by both" {
   run bash -c "printf '/\n' | bash '$ROOT/lib/step.sh' '$ROOT/actions/hf-cache.sh' run"
   [ "$status" -ne 0 ] && [[ "$output" == *"absolute path other than /"* ]]

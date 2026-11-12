@@ -1,49 +1,61 @@
-# The Pipeline's side of the Hugging Face cache folder, sourced by the hf-cache
-# and hf-export Actions only. What a cache folder is (its layout, valid paths,
-# shared, exported) is admin/share-hf-cache.sh's to say (docs/adr/0003): these
+# The Pipeline's side of the Hugging Face Cache folder, sourced by the hf-cache
+# and hf-export Actions only. What a Cache folder is (its layout, valid paths,
+# Shared, Exported) is admin/share-hf-cache.sh's to say (docs/adr/0003): these
 # helpers ask it. What stays here is what only the Pipeline can see: which
 # folder this user's settings and env.sh point to.
 
-# hf_admin ARG... — admin/share-hf-cache.sh, as you.
+# hf_admin ARG... — admin/share-hf-cache.sh, as you. The one place that knows
+# where the script is.
 hf_admin() { bash "$MIP_ROOT/admin/share-hf-cache.sh" "$@"; }
 
-# hf_cache_state DIR — fill HF_STATE with the script's --state for DIR (keys:
-# folder hub datasets home owner shared writable exported). Exits 1, with the
-# script's message, when DIR cannot be a cache folder. Call it directly, not
-# in $(...): it sets a global.
+# hf_cache_state DIR — fill HF_STATE with the script's --state for DIR: folder,
+# home, owner, shared, writable, exported, and one key per cache variable (see
+# hf_cache_vars). Status 1, with the script's message, when DIR cannot be a
+# Cache folder. It sets a variable, so call it directly, not in $(...); a
+# caller that must keep the HF_STATE it has declares `local -A HF_STATE` first.
 declare -A HF_STATE=()
 hf_cache_state() {
   local out k v
   HF_STATE=()
-  out="$(hf_admin --state "$1")" || exit 1
+  out="$(hf_admin --state "$1")" || return 1
   while IFS='=' read -r k v; do HF_STATE[$k]="$v"; done <<<"$out"
 }
 
-# hf_cache_mine_and_private — the folder HF_STATE describes holds only your
-# own downloads: nobody else owns it and it is not shared in any way.
-hf_cache_mine_and_private() { [ "${HF_STATE[owner]}" != other ] && [ "${HF_STATE[shared]}" = none ]; }
-
-# hf_cache_folder PATH — PATH as a cache folder (~ expanded, no trailing /);
-# fails, with the script's message, when it cannot be one.
-hf_cache_folder() {
-  local out
-  out="$(hf_admin --state "$1")" || return 1
-  sed -n 's/^folder=//p' <<<"$out"
+# hf_cache_vars — the variables that point into the folder HF_STATE describes
+# (HF_HUB_CACHE, HF_DATASETS_CACHE), one per line; HF_STATE[variable] is the
+# cache each points to.
+hf_cache_vars() {
+  local k
+  for k in "${!HF_STATE[@]}"; do
+    case "$k" in HF_*) printf '%s\n' "$k" ;; esac
+  done | sort
 }
 
-# hf_cache_recorded — the cache folder env.sh records (the hf-cache Step's), or nothing.
+# hf_cache_mine_and_private — the directory HF_STATE describes holds only your
+# own downloads: nobody else owns it and it is not Shared in any way.
+hf_cache_mine_and_private() { [ "${HF_STATE[owner]}" != other ] && [ "${HF_STATE[shared]}" = none ]; }
+
+# hf_cache_folder PATH — PATH as a Cache folder (~ expanded, no trailing /);
+# status 1, with the script's message, when it cannot be one.
+hf_cache_folder() {
+  local -A HF_STATE=()
+  hf_cache_state "$1" || return 1
+  printf '%s\n' "${HF_STATE[folder]}"
+}
+
+# hf_cache_recorded — the Cache folder env.sh records (the hf-cache Step's), or nothing.
 hf_cache_recorded() {
   local hub
   hub="$(env_value HF_HUB_CACHE)"
   if [ -n "$hub" ]; then hf_admin --folder-of "$hub" "$(env_value HF_DATASETS_CACHE)"; fi
 }
 
-# hf_cache_resolve — the cache folder already decided, first found of: the
+# hf_cache_resolve — the Cache folder already decided, first found of: the
 # HF_CACHE_DIR setting, the one env.sh records (the hf-cache Step's), the one
-# exported for every user (read fresh, so root's export from earlier in this
-# Run counts), the folder holding an HF_HUB_CACHE=<folder>/hub this shell has
-# (an older export). Nothing when none is; fails when the setting cannot be a
-# cache folder.
+# login shells get (read fresh, so root's export from earlier in this Run
+# counts), the folder holding an HF_HUB_CACHE=<folder>/hub this shell has (an
+# older export). Nothing when none is; status 1 when the setting cannot be a
+# Cache folder.
 hf_cache_resolve() {
   local f
   if [ -n "${HF_CACHE_DIR:-}" ]; then hf_cache_folder "$HF_CACHE_DIR"; return; fi
@@ -53,7 +65,7 @@ hf_cache_resolve() {
   if [ -n "$f" ]; then printf '%s\n' "$f"; fi
 }
 
-# hf_ask_folder QUESTION DEFAULT — ask on the terminal for a cache folder; Enter,
+# hf_ask_folder QUESTION DEFAULT — ask on the terminal for a Cache folder; Enter,
 # or no answer at all (EOF), takes DEFAULT. Prints it as hf_cache_folder does.
 hf_ask_folder() {
   local f
