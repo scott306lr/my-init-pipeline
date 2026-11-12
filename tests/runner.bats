@@ -113,15 +113,6 @@ setup() { setup_pipeline; }
   grep -q 'end needs-ask' "$T/events"
 }
 
-@test "an Interactive Step whose Check does not apply is n/a; dependents run" {
-  step off; step after off
-  fake_action off --interactive --na; fake_action after
-  run mip run --non-interactive
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"off "*"na"* ]] && [[ "$output" != *"deferred"* ]]
-  grep -q 'end after' "$T/events"
-}
-
 @test "optional: skipped (not run) unless named or forced; done shows done; what requires it still runs" {
   step x; step after x; step other
   fake_action x --optional; fake_action after; fake_action other

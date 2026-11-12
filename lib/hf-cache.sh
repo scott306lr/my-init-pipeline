@@ -25,11 +25,12 @@ hf_cache_state() {
 
 # hf_cache_vars — the variables that point into the folder HF_STATE describes
 # (HF_HUB_CACHE, HF_DATASETS_CACHE), one per line; HF_STATE[variable] is the
-# cache each points to.
+# cache each points to. They are --state's keys in capitals, as the script's
+# header says.
 hf_cache_vars() {
   local k
   for k in "${!HF_STATE[@]}"; do
-    case "$k" in HF_*) printf '%s\n' "$k" ;; esac
+    case "$k" in *[!A-Z_]*) ;; *) printf '%s\n' "$k" ;; esac
   done | sort
 }
 

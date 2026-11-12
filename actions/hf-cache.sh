@@ -60,21 +60,21 @@ check() {
 }
 
 run() {
-  local folder legacy legacy_folder answer share="$HF_CACHE_SHARED" var
-  local -A from=() to=()
-  local -a vars=() moves=()
+  local folder legacy legacy_folder answer share="$HF_CACHE_SHARED" var src
+  local -a vars=() sources=() dirs=()
   case "$share" in "" | yes | no) ;; *) die "HF_CACHE_SHARED must be yes, no or empty, got '$share'" ;; esac
-  # Where the downloads are now, before anything changes: where env.sh points
-  # each cache, else that cache in the relocated HF_HOME or in HF's default.
-  # A relocated HF_HOME is read as a Cache folder, so its caches are found
-  # however it was spelled; one that cannot be a folder at all has none.
+  # Where the downloads are now, before anything changes, as VARIABLE SOURCE
+  # pairs: where env.sh points each cache, else that cache in the relocated
+  # HF_HOME or in HF's default. A relocated HF_HOME is read as a Cache folder,
+  # so its caches are found however it was spelled; one that cannot be a
+  # folder at all has none.
   legacy="$(legacy_home)"
   if [ -n "$legacy" ]; then legacy_folder="$(hf_cache_folder "$legacy" 2>/dev/null)" || legacy_folder=""; fi
   hf_cache_state "${legacy_folder:-$HF_HOME_DEFAULT}" || return 1
   mapfile -t vars < <(hf_cache_vars)
   for var in "${vars[@]}"; do
-    from[$var]="$(env_value "$var")"
-    from[$var]="${from[$var]:-${HF_STATE[$var]}}"
+    src="$(env_value "$var")"
+    sources+=("$var" "${src:-${HF_STATE[$var]}}")
   done
   folder="$(hf_cache_resolve)" || return 1
   if [ -z "$HF_CACHE_DIR" ]; then
@@ -82,6 +82,7 @@ run() {
     folder="$(hf_ask_folder "Hugging Face cache folder (holds hub/ and datasets/)" "${folder:-$(suggestion)}")" || return 1
   fi
   if [ -n "$legacy" ]; then restore_home "${legacy_folder:-}"; fi
+  # From here on HF_STATE describes the chosen folder.
   hf_cache_state "$folder" || return 1
   if should_ask_to_share && [ -z "$share" ]; then
     # Enter shares; no answer at all (EOF) never does.
@@ -91,18 +92,15 @@ run() {
       share=no
     fi
   fi
-  for var in "${vars[@]}"; do
-    to[$var]="${HF_STATE[$var]}"
-    moves+=("${from[$var]}" "${to[$var]}")
-  done
-  if mkdir -p "${to[@]}"; then hf_cache_state "$folder" || return 1; fi
+  for var in "${vars[@]}"; do dirs+=("${HF_STATE[$var]}"); done
+  if mkdir -p "${dirs[@]}"; then hf_cache_state "$folder" || return 1; fi
   if [ "${HF_STATE[writable]}" != yes ]; then
-    die "cannot create or write to ${to[*]}: $folder needs root first; tick hf-export too (or run: ./init.sh run hf-export hf-cache), or ask an admin to run: admin/share-hf-cache.sh $folder"
+    die "cannot create or write to ${dirs[*]}: $folder needs root first; tick hf-export too (or run: ./init.sh run hf-export hf-cache), or ask an admin to run: admin/share-hf-cache.sh $folder"
   fi
-  move_then_share "$folder" "$share" "${moves[@]}"
+  move_then_share "$folder" "$share" "${sources[@]}"
   for var in "${vars[@]}"; do
-    add_env "$var" "${to[$var]/#$HOME/\$HOME}"
-    info "$var = ${to[$var]}"
+    add_env "$var" "${HF_STATE[$var]/#$HOME/\$HOME}"
+    info "$var = ${HF_STATE[$var]}"
   done
 }
 
@@ -124,16 +122,19 @@ note() {
 # shared folder, or someone else's, is used as its owner set it up.
 should_ask_to_share() { [ "${HF_STATE[home]}" = no ] && hf_cache_mine_and_private; }
 
-# move_then_share FOLDER SHARE [SRC DST]... — move your downloads from each
-# SRC into its DST (a cache of FOLDER), then share FOLDER when SHARE is yes or
-# it is Shared already, as it stands once the caches exist: a new Cache folder
-# under a setgid parent is. The one order that works: sharing covers the entries you
-# own in FOLDER at that moment, so it has to come after whatever is moved in.
+# move_then_share FOLDER SHARE [VARIABLE SOURCE]... — move your downloads from
+# each SOURCE into the cache of FOLDER that VARIABLE points to, then share
+# FOLDER when SHARE is yes or it is Shared already, as it stands once the
+# caches exist: a new Cache folder under a setgid parent is. The one order
+# that works: sharing covers the entries you own in FOLDER at that moment, so
+# it has to come after whatever is moved in. Leaves HF_STATE describing FOLDER.
 move_then_share() {
-  local folder="$1" share="$2"
+  local folder="$1" share="$2" dst
   shift 2
+  hf_cache_state "$folder" || return 1
   while [ $# -ge 2 ]; do
-    if [ -d "$1" ] && [ -n "$(ls -A "$1")" ] && ! [ "$1" -ef "$2" ]; then move_downloads "$1" "$2"; fi
+    dst="${HF_STATE[$1]}"
+    if [ -d "$2" ] && [ -n "$(ls -A "$2")" ] && ! [ "$2" -ef "$dst" ]; then move_downloads "$2" "$dst"; fi
     shift 2
   done
   hf_cache_state "$folder" || return 1

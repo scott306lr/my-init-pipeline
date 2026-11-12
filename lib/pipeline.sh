@@ -116,11 +116,11 @@ required_by() {
 
 # ── the Plan ──────────────────────────────────────────────────────────────────
 
-# What this Run was asked to do. init.sh fills FORCE and UPGRADE (from --force
-# and the checklist's ticks); pipeline_choose derives the rest, which
+# What this Run was asked to do. init.sh fills FORCE (from --force) and REDO
+# (from the checklist's ticks); pipeline_choose derives the rest, which
 # pipeline_run and the dry run read.
 declare -A FORCE=()        # step -> 1: run it even if its Check passes
-declare -A UPGRADE=()      # step -> 1: upgrade it if its Check passes
+declare -A REDO=()         # step -> 1: chosen although its Check passes: upgrade it, or run it again
 declare -a SELECTED=()     # the Steps this Run covers, in dependency order
 declare -A STEP_MODE=()    # step -> install | upgrade | force: what to do when its Check passes
 declare -A UNCHOSEN=()     # step -> 1: an Optional Step nobody chose: skipped while it has work to do
@@ -128,8 +128,9 @@ declare -A UNCHOSEN=()     # step -> 1: an Optional Step nobody chose: skipped w
 # pipeline_choose MODE [TARGET...] — select TARGETs and what they require (the
 # whole Pipeline when none is named) into SELECTED, and settle each selected
 # Step's mode and whether it is an Optional Step left unchosen. MODE (install |
-# upgrade) is the mode of every Step in neither FORCE nor UPGRADE. Named and
-# forced Steps count as chosen.
+# upgrade) is the mode of every Step in neither FORCE nor REDO; a REDO Step is
+# upgraded when its Action has upgrade(), else forced. Named and forced Steps
+# count as chosen.
 pipeline_choose() {
   local mode="$1" s
   local -A chosen=()
@@ -139,8 +140,9 @@ pipeline_choose() {
   for s in "$@" "${!FORCE[@]}"; do chosen[$s]=1; done
   for s in "${SELECTED[@]}"; do
     if [ -n "${FORCE[$s]:-}" ]; then STEP_MODE[$s]=force
-    elif [ -n "${UPGRADE[$s]:-}" ]; then STEP_MODE[$s]=upgrade
-    else STEP_MODE[$s]="$mode"; fi
+    elif [ -z "${REDO[$s]:-}" ]; then STEP_MODE[$s]="$mode"
+    elif action_defines "$s" upgrade; then STEP_MODE[$s]=upgrade
+    else STEP_MODE[$s]=force; fi
     if is_optional "$s" && [ -z "${chosen[$s]:-}" ]; then UNCHOSEN[$s]=1; fi
   done
 }
@@ -195,10 +197,10 @@ step_decide() {
 
 # ── execution ─────────────────────────────────────────────────────────────────
 
-# The Plans that do work: plan -> "STARTED RESULT", the word announced while
-# the Step works and its result word when the work succeeds. Each is also the
-# name of the Action function that does the work.
-declare -A WORK=([run]="installing ran" [upgrade]="upgrading upgraded")
+# The Plans that do work. Each is the name of the Action function that does
+# it; the others (na, done, optional, deferred) are their own result.
+declare -A WORKING=([run]=installing [upgrade]=upgrading)   # plan -> the word announced while the Step works
+declare -A WORKED=([run]=ran [upgrade]=upgraded)            # plan -> the result word when the work succeeds
 
 # step_execute STEP INTERACTIVE — one Step of the Run: take its Check, plan,
 # and do the work the Plan calls for, leaving the result word in
@@ -210,17 +212,17 @@ step_execute() {
   local step="$1" interactive="$2" log="$RUN_DIR/$1.log" plan result rc=0
   echo "== $step (action: ${ACTION[$step]}, ${STEP_MODE[$step]:-install}$([ "$interactive" = yes ] && echo ', interactive')) $(date '+%F %T')" >>"$log"
   plan="$(step_decide "$step" "$interactive" 9>>"$log")"
-  if [[ -v WORK[$plan] ]]; then
+  if [[ -v WORKED[$plan] ]]; then
     if [ "$interactive" = yes ]; then
       printf '▶ %s (interactive)\n' "$step"
       step_work "$step" "$plan" </dev/tty 9>>"$log" || rc=$?
     else
-      echo "${WORK[$plan]% *}" >"$RUN_DIR/$step.started"
+      echo "${WORKING[$plan]}" >"$RUN_DIR/$step.started"
       step_work "$step" "$plan" >>"$log" 2>&1 9>>"$log" || rc=$?
     fi
     result=failed
     if [ "$rc" = 0 ]; then
-      result="${WORK[$plan]#* }"
+      result="${WORKED[$plan]}"
       step_note "$step" "$result"
     fi
   else

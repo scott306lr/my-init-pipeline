@@ -76,7 +76,7 @@ cmd_describe() {
 cmd_run() {
   local -a targets=()
   local dry=0 yes=0 rc=0 picked mode=install s check
-  FORCE=() UPGRADE=()
+  FORCE=() REDO=()
   MIP_JOBS="$(nproc 2>/dev/null || echo 4)"
   MIP_INTERACTIVE=1
   while [ $# -gt 0 ]; do
@@ -108,11 +108,9 @@ cmd_run() {
     elif [ -z "$picked" ]; then
       echo "No Steps selected; nothing to do."; return 0
     else
-      # Ticked although done: upgrade it, or re-run it if it has no upgrade().
       while read -r s check; do
         targets+=("$s")
-        [ "$check" = "done" ] || continue
-        if action_defines "$s" upgrade; then UPGRADE[$s]=1; else FORCE[$s]=1; fi
+        if [ "$check" = "done" ]; then REDO[$s]=1; fi   # ticked although done
       done <<<"$picked"
     fi
   fi

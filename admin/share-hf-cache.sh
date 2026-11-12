@@ -16,6 +16,8 @@
 #                                             HF_HUB_CACHE=, HF_DATASETS_CACHE=
 #                                                                      the caches in it, each under
 #                                                                      the variable that points to it
+#                                                                      (the keys in capitals are the
+#                                                                      cache variables, and only they)
 #                                             home=yes|no              DIR is, or lies in, your home
 #                                             owner=me|other|none      none: DIR does not exist
 #                                             shared=acl|group|none    how others may add entries
@@ -57,7 +59,7 @@ set -euo pipefail
 # Everything lives in main, called on the last line: a truncated download
 # defines a function that is never called instead of running half a script.
 main() {
-  local root=0 dir p line
+  local root=0 dir p var
   # Where an export for every user lives: login shells read PROFILE, and
   # pam_env reads ENVIRONMENT for sessions that start no login shell.
   PROFILE="${MIP_HF_PROFILE:-/etc/profile.d/hf-cache.sh}"       # override: tests
@@ -65,11 +67,12 @@ main() {
   case "${1:-}" in
     --exported-folder) [ $# -eq 1 ] || usage; exported_folder; return ;;
     --folder-of) [ $# -eq 2 ] || [ $# -eq 3 ] || usage; folder_of "${@:2}"; return ;;
-    --state) [ $# -eq 2 ] || usage; dir="$(cache_folder "$2")"; state "$dir"; return ;;
+    --state) [ $# -eq 2 ] || usage; dir="$(cache_folder "$2")"; caches_of "$dir"; state "$dir"; return ;;
     -*) usage ;;
   esac
   [ $# -eq 1 ] || usage
   dir="$(cache_folder "$1")"
+  caches_of "$dir"
   if [ "$(id -u)" = 0 ]; then root=1; fi
 
   if [ ! -d "$dir" ]; then
@@ -79,12 +82,12 @@ main() {
   if [ "$root" = 0 ] && [ ! -O "$dir" ] && [ "$(how_shared "$dir")" = none ]; then
     die "$dir belongs to $(stat -c %U "$dir"); ask them, or root, to run: share-hf-cache.sh $dir"
   fi
-  while IFS='=' read -r _ p; do
+  for p in "${CACHE_DIRS[@]}"; do
     if [ ! -d "$p" ]; then
       mkdir "$p"
       if [ "$root" = 1 ] && [ -n "${SUDO_USER:-}" ]; then chown "$SUDO_USER" "$p"; fi
     fi
-  done < <(cache_vars "$dir")
+  done
 
   # A folder shared through its group stays so: your entries join the group.
   if [ "$root" = 0 ] && [ "$(how_shared "$dir")" = group ]; then
@@ -119,15 +122,15 @@ main() {
   done
 
   if [ "$root" = 1 ]; then
-    profile_lines "$dir" >"$PROFILE"
+    cache_lines 'export %s=%q\n' >"$PROFILE"
     chmod 644 "$PROFILE"
     rm -f /etc/profile.d/hf-hub-cache.sh   # its name before datasets/ was shared too
-    while IFS= read -r line; do sed -i "/^${line%%=*}=/d" "$ENVIRONMENT"; done < <(cache_vars "$dir")
-    cache_vars "$dir" >>"$ENVIRONMENT"
-    echo "$(cache_vars "$dir" | paste -sd ' ') for every user from their next login"
+    for var in "${CACHE_VARS[@]}"; do sed -i "/^$var=/d" "$ENVIRONMENT"; done
+    cache_lines '%s=%s\n' >>"$ENVIRONMENT"
+    echo "$(cache_lines '%s=%s ')for every user from their next login"
   fi
   echo "$dir is shared with every user of this server"
-  if [ "$root" = 0 ] && ! is_exported "$dir"; then
+  if [ "$root" = 0 ] && ! is_exported; then
     echo "For users who don't run my-init-pipeline, root can export it for everyone: sudo bash $0 $dir"
   fi
 }
@@ -162,11 +165,23 @@ join_group() {
   find "$dir" -user "$me" -type f ! -path '*/blobs/*' -exec chmod g+rw {} +
 }
 
-# cache_vars DIR — the caches of Cache folder DIR, one VARIABLE=PATH per line:
-# the variable Hugging Face reads, and where in DIR it points. The layout is
-# written down here and in folder_of, its inverse; exported_folder, which reads
-# those variables back from the profile, is the only other code that names them.
-cache_vars() { printf 'HF_HUB_CACHE=%s\nHF_DATASETS_CACHE=%s\n' "$1/hub" "$1/datasets"; }
+# caches_of DIR — set CACHE_VARS and CACHE_DIRS to the caches of Cache folder
+# DIR: the variables Hugging Face reads, and where in DIR each points, in the
+# same order. The layout is written down here and in folder_of, its inverse;
+# exported_folder, which reads those variables back from the profile, is the
+# only other code that names them. main calls it once, for the DIR it is given.
+caches_of() {
+  CACHE_VARS=(HF_HUB_CACHE HF_DATASETS_CACHE)
+  CACHE_DIRS=("$1/hub" "$1/datasets")
+}
+
+# cache_lines FORMAT — print FORMAT (a printf format taking a variable and its
+# cache) once per cache.
+cache_lines() {
+  local i
+  # shellcheck disable=SC2059 # the format is the argument
+  for i in "${!CACHE_VARS[@]}"; do printf "$1" "${CACHE_VARS[i]}" "${CACHE_DIRS[i]}"; done
+}
 
 # folder_of HUB [DATASETS] — the Cache folder holding them, when HUB is
 # <folder>/hub and DATASETS (if given) is <folder>/datasets; else nothing.
@@ -195,12 +210,12 @@ state() {
   if [ -e "$dir" ]; then
     if [ -O "$dir" ]; then owner=me; else owner=other; fi
   fi
-  while IFS='=' read -r _ p; do
+  for p in "${CACHE_DIRS[@]}"; do
     if [ ! -w "$p" ]; then writable=no; fi
-  done < <(cache_vars "$dir")
-  if is_exported "$dir"; then exported=yes; fi
+  done
+  if is_exported; then exported=yes; fi
   printf 'folder=%s\n' "$dir"
-  cache_vars "$dir"
+  cache_lines '%s=%s\n'
   printf 'home=%s\nowner=%s\nshared=%s\nwritable=%s\nexported=%s\n' \
     "$home" "$owner" "$(how_shared "$dir")" "$writable" "$exported"
 }
@@ -215,19 +230,13 @@ exported_folder() {
   )
 }
 
-# is_exported DIR — both PROFILE and ENVIRONMENT export DIR's caches.
+# is_exported — both PROFILE and ENVIRONMENT export the caches caches_of set.
 is_exported() {
-  local line
-  [ "$(cat "$PROFILE" 2>/dev/null)" = "$(profile_lines "$1")" ] || return 1
-  while IFS= read -r line; do
-    grep -qxF -- "$line" "$ENVIRONMENT" 2>/dev/null || return 1
-  done < <(cache_vars "$1")
-}
-
-# profile_lines DIR — what PROFILE holds once DIR is exported.
-profile_lines() {
-  local var path
-  while IFS='=' read -r var path; do printf 'export %s=%q\n' "$var" "$path"; done < <(cache_vars "$1")
+  local i
+  [ "$(cat "$PROFILE" 2>/dev/null)" = "$(cache_lines 'export %s=%q\n')" ] || return 1
+  for i in "${!CACHE_VARS[@]}"; do
+    grep -qxF -- "${CACHE_VARS[i]}=${CACHE_DIRS[i]}" "$ENVIRONMENT" 2>/dev/null || return 1
+  done
 }
 
 usage() {
